@@ -1,0 +1,22 @@
+{
+  "name": "tabbit2api",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Tabbit to OpenAI Responses-compatible gateway for local agent integrations.",
+  "scripts": {
+    "prepare": "husky",
+    "commitlint": "commitlint --edit",
+    "login": "node src/login.js",
+    "probe": "node src/probe.js",
+    "start": "node src/gateway.js"
+  },
+  "license": "GPL-3.0-only",
+  "dependencies": {
+    "playwright": "^1.60.0"
+  },
+  "devDependencies": {
+    "@commitlint/config-conventional": "^19.8.1",
+    "@commitlint/cli": "^19.8.1",
+    "husky": "^9.1.7"
+  }
+}

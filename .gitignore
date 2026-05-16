@@ -1,0 +1,12 @@
+.lab/
+.lab-auth-verify/
+.lab-verify/
+node_modules/
+output/
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+coverage/
+.husky/_/

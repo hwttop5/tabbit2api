@@ -1,0 +1,21 @@
+model:
+  default: "tabbit/priority"
+  provider: "custom"
+  base_url: "http://127.0.0.1:50124/v1"
+  api_key: "sk-tabbit-local"
+  api_mode: "codex_responses"
+
+model_aliases:
+  tabbit:
+    model: "tabbit/priority"
+    provider: "custom"
+    base_url: "http://127.0.0.1:50124/v1"
+
+terminal:
+  backend: "local"
+  cwd: "."
+  timeout: 180
+  lifetime_seconds: 300
+
+display:
+  streaming: true
