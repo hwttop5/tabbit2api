@@ -1,4 +1,8 @@
 import crypto from "node:crypto";
+import {
+  collectChatAttachments,
+  isOpenAiAttachmentPart,
+} from "./attachments.js";
 
 function randomId(prefix) {
   return `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -22,6 +26,10 @@ function textFromContentPart(part) {
   }
 
   if (!part || typeof part !== "object") {
+    return "";
+  }
+
+  if (isOpenAiAttachmentPart(part)) {
     return "";
   }
 
@@ -157,8 +165,27 @@ function normalizeChatMessages(messages) {
   };
 }
 
+function ensureMessageForAttachments(messages, attachments) {
+  if (messages.length || !attachments.length) {
+    return messages;
+  }
+
+  return [
+    {
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: "Please analyze the attached file(s).",
+        },
+      ],
+    },
+  ];
+}
+
 export function normalizeChatCompletionsRequest(body) {
   const normalized = normalizeChatMessages(body?.messages);
+  const attachments = collectChatAttachments(body?.messages);
   return {
     protocol: "openai-chat-completions",
     requestedModel:
@@ -167,7 +194,8 @@ export function normalizeChatCompletionsRequest(body) {
         : "tabbit/priority",
     publicModel: body?.model || "tabbit/priority",
     system: normalized.system,
-    messages: normalized.messages,
+    messages: ensureMessageForAttachments(normalized.messages, attachments),
+    attachments,
     tools: {
       client: normalizeChatTools(body?.tools),
       server: [],

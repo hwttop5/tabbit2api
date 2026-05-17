@@ -1,5 +1,12 @@
 import crypto from "node:crypto";
 import { countTokens } from "@anthropic-ai/tokenizer";
+import {
+  collectAnthropicAttachments,
+  collectOpenAiAttachments,
+  isAnthropicAttachmentBlock,
+  isOpenAiAttachmentPart,
+  summarizeAttachmentsForPrompt,
+} from "./attachments.js";
 
 function randomId(prefix) {
   return `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -82,6 +89,10 @@ function normalizeAnthropicBlock(block) {
     return [{ type: "text", text: block.text }];
   }
 
+  if (isAnthropicAttachmentBlock(block)) {
+    return [];
+  }
+
   return [
     {
       type: "text",
@@ -103,6 +114,10 @@ function normalizeOpenAiInputPart(part) {
     return [];
   }
 
+  if (isOpenAiAttachmentPart(part)) {
+    return [];
+  }
+
   if (typeof part.text === "string") {
     return [{ type: "text", text: part.text }];
   }
@@ -116,6 +131,24 @@ function normalizeOpenAiInputPart(part) {
   }
 
   return [];
+}
+
+function ensureMessageForAttachments(messages, attachments) {
+  if (messages.length || !attachments.length) {
+    return messages;
+  }
+
+  return [
+    {
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: "Please analyze the attached file(s).",
+        },
+      ],
+    },
+  ];
 }
 
 function normalizeMessageArray(messages, blockNormalizer) {
@@ -212,12 +245,19 @@ export function normalizeAnthropicRequest(body, helpers = {}) {
     }
   }
 
+  const attachments = collectAnthropicAttachments(body?.messages);
+  const messages = ensureMessageForAttachments(
+    normalizeMessageArray(body?.messages, normalizeAnthropicBlock),
+    attachments,
+  );
+
   return {
     protocol: "anthropic",
     requestedModel: model,
     publicModel: body?.model || null,
     system: normalizeSystem(body?.system),
-    messages: normalizeMessageArray(body?.messages, normalizeAnthropicBlock),
+    messages,
+    attachments,
     tools: {
       client: clientTools,
       server: serverTools,
@@ -238,6 +278,7 @@ export function normalizeAnthropicRequest(body, helpers = {}) {
 
 export function normalizeOpenAiRequest(body) {
   const content = normalizeOpenAiInputPart(body?.input);
+  const attachments = collectOpenAiAttachments(body?.input);
   const clientTools = [];
   for (const tool of Array.isArray(body?.tools) ? body.tools : []) {
     if (tool?.type === "function" && tool.function?.name) {
@@ -264,14 +305,18 @@ export function normalizeOpenAiRequest(body) {
         : "tabbit/priority",
     publicModel: body?.model || "tabbit/priority",
     system: normalizeSystem(body?.instructions),
-    messages: content.length
-      ? [
-          {
-            role: "user",
-            content,
-          },
-        ]
-      : [],
+    messages: ensureMessageForAttachments(
+      content.length
+        ? [
+            {
+              role: "user",
+              content,
+            },
+          ]
+        : [],
+      attachments,
+    ),
+    attachments,
     tools: {
       client: clientTools,
       server: [],
@@ -342,6 +387,10 @@ function summarizeNormalizedMessages(messages) {
   }));
 }
 
+function summarizeNormalizedAttachments(attachments) {
+  return summarizeAttachmentsForPrompt(attachments || []);
+}
+
 export function buildStructuredPrompt(normalizedRequest) {
   const clientTools = normalizedRequest.tools.client.map((tool) => ({
     name: tool.name,
@@ -403,6 +452,19 @@ export function buildStructuredPrompt(normalizedRequest) {
     "Conversation state:",
     JSON.stringify(summarizeNormalizedMessages(normalizedRequest.messages), null, 2),
   ];
+
+  if (normalizedRequest.attachments?.length) {
+    sections.push(
+      "",
+      "Attached files:",
+      "The files below are provided to the model as Tabbit references. Use their actual contents when answering; do not assume they are only text placeholders.",
+      JSON.stringify(
+        summarizeNormalizedAttachments(normalizedRequest.attachments),
+        null,
+        2,
+      ),
+    );
+  }
 
   if (normalizedRequest.maxOutputTokens) {
     sections.push("", `Target max_output_tokens: ${normalizedRequest.maxOutputTokens}`);
@@ -533,6 +595,7 @@ async function repairStructuredEnvelope(rawText, normalizedRequest, deps) {
   const repairResult = await deps.sendPromptToTabbit({
     prompt: repairPrompt,
     model: normalizedRequest.requestedModel,
+    attachments: normalizedRequest.attachments || [],
   });
 
   if (!repairResult.ok) {
@@ -636,6 +699,7 @@ export async function runGatewaySession(normalizedRequest, deps) {
     const tabbitResult = await deps.sendPromptToTabbit({
       prompt,
       model: workingRequest.requestedModel,
+      attachments: workingRequest.attachments || [],
     });
 
     if (!tabbitResult.ok) {

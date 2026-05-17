@@ -36,7 +36,6 @@ import { executeServerToolUse, normalizeServerToolDefinition } from "./server-to
 import {
   buildTextResponse,
   streamTextResponse,
-  extractPrompt,
 } from "./openai-responses.js";
 import {
   buildChatCompletionResponse,
@@ -67,6 +66,10 @@ function statusCodeForResult(result) {
 
   if (result.error === "timeout") {
     return 504;
+  }
+
+  if (result.failure_reason === "upstream_unavailable") {
+    return 503;
   }
 
   return 502;
@@ -161,19 +164,18 @@ async function handleModelById(_req, res, deps, modelId) {
 
 async function handleOpenAiResponses(req, res, deps) {
   const body = await readJson(req);
-  const prompt = extractPrompt(body);
+  const normalized = normalizeOpenAiRequest(body);
 
-  if (!prompt) {
+  if (!normalized.messages.length && !normalized.attachments.length) {
     writeOpenAiError(
       res,
       400,
-      "No prompt text was found in the request body.",
+      "No prompt text or attachments were found in the request body.",
       "invalid_request_error",
     );
     return;
   }
 
-  const normalized = normalizeOpenAiRequest(body);
   const sessionResult = await deps.runGatewaySession(normalized);
   logRouteResult(sessionResult, body.model || "tabbit/priority");
 
@@ -225,11 +227,11 @@ async function handleOpenAiChatCompletions(req, res, deps) {
   const body = await readJson(req);
   const normalized = normalizeChatCompletionsRequest(body);
 
-  if (!normalized.messages.length) {
+  if (!normalized.messages.length && !normalized.attachments.length) {
     writeOpenAiError(
       res,
       400,
-      "No conversation messages were provided.",
+      "No conversation messages or attachments were provided.",
       "invalid_request_error",
     );
     return;
@@ -454,11 +456,11 @@ async function handleAnthropicMessages(req, res, deps) {
     return;
   }
 
-  if (!normalized.messages.length) {
+  if (!normalized.messages.length && !normalized.attachments.length) {
     writeAnthropicError(
       res,
       400,
-      "No conversation messages were provided.",
+      "No conversation messages or attachments were provided.",
       "invalid_request_error",
     );
     return;

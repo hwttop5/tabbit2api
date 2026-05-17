@@ -4,6 +4,7 @@ import {
   TABBIT_MODELS_URL,
   TABBIT_USER_DATA_DIR,
 } from "./config.js";
+import { materializeAttachmentsForUpload } from "./attachments.js";
 import { prepareLabProfile } from "./profile.js";
 import { launchTabbitSession, openPage } from "./tabbit-session.js";
 
@@ -64,6 +65,7 @@ const INVALID_REQUEST_PATTERNS = [
 ];
 
 const RETRYABLE_AVAILABILITY_PATTERNS = [
+  /\[492\]/i,
   /\b429\b/i,
   /\b5\d{2}\b/i,
   /\brate limit\b/i,
@@ -99,6 +101,9 @@ const RETRYABLE_AVAILABILITY_PATTERNS = [
   /\bforbidden\b/i,
   /\bnot authorized\b/i,
   /\baccess denied\b/i,
+  /Service is busy\.?\s*Please try again tomorrow\.?/i,
+  /欢迎使用\s*Tabbit\s*浏览器/i,
+  /免费使用最全最先进的模型/i,
 ];
 
 let bridgePromise = null;
@@ -118,6 +123,52 @@ function runExclusively(task) {
 
 function cleanText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function randomReferenceId() {
+  return `${Date.now() + Math.floor(Math.random() * 1_000_000)}`;
+}
+
+export function attachmentUploadResultToReference(attachment, uploadResult) {
+  const fileId = cleanText(
+    uploadResult?.fileId ||
+      uploadResult?.file_id ||
+      uploadResult?.id ||
+      uploadResult?.path,
+  );
+  if (!fileId) {
+    throw new Error(
+      `Tabbit upload did not return a file id for '${attachment?.filename || "attachment"}'.`,
+    );
+  }
+
+  const title = cleanText(
+    uploadResult?.fileName ||
+      uploadResult?.filename ||
+      uploadResult?.name ||
+      attachment?.filename,
+  );
+  const url = cleanText(uploadResult?.url || uploadResult?.fileUrl || "");
+
+  if (attachment?.kind === "image") {
+    return {
+      id: randomReferenceId(),
+      type: "image",
+      title,
+      content: url,
+      favicon: "",
+      path: fileId,
+      ...(attachment.sourceUrl ? { sourceUrl: attachment.sourceUrl } : {}),
+    };
+  }
+
+  return {
+    id: randomReferenceId(),
+    type: "document",
+    title,
+    content: "",
+    path: fileId,
+  };
 }
 
 function decodeLatin1Utf8(value) {
@@ -376,7 +427,7 @@ function matchesAny(text, patterns) {
   return patterns.some((pattern) => pattern.test(text));
 }
 
-function classifyAttemptFailure(result) {
+export function classifyAttemptFailure(result) {
   if (result.ok) {
     return { retryable: false, reason: "success" };
   }
@@ -490,7 +541,7 @@ function isLoggedOut(loginState) {
 
 async function sendUsingPageModule(
   page,
-  { prompt, selectedModel, timeoutMs, models, onDelta },
+  { prompt, selectedModel, timeoutMs, models, onDelta, attachments = [] },
 ) {
   const streamId = `tabbit-stream-${Date.now()}-${++streamSequence}`;
   if (onDelta) {
@@ -501,8 +552,16 @@ async function sendUsingPageModule(
     });
   }
 
-  return page.evaluate(
-    async ({ prompt, selectedModel, timeoutMs, models, streamBridgeName }) => {
+  try {
+    return await page.evaluate(
+      async ({
+      prompt,
+      selectedModel,
+      timeoutMs,
+      models,
+      streamBridgeName,
+      attachments,
+      }) => {
       function captureWebpackRequire() {
         let runtime = null;
         self.webpackChunk_N_E.push([
@@ -534,6 +593,151 @@ async function sendUsingPageModule(
 
       function summarizeFailure(args) {
         return args.map((value) => stringifyDetail(value)).join(" | ");
+      }
+
+      function cleanText(value) {
+        return typeof value === "string" ? value.trim() : "";
+      }
+
+      function bytesFromBase64(base64) {
+        const binary = atob(base64 || "");
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) {
+          bytes[index] = binary.charCodeAt(index);
+        }
+        return bytes;
+      }
+
+      function withTimeout(promise, timeout, label) {
+        let timer;
+        const timeoutPromise = new Promise((_, reject) => {
+          timer = setTimeout(() => {
+            reject(new Error(`${label} timed out after ${timeout}ms.`));
+          }, timeout);
+        });
+
+        return Promise.race([promise, timeoutPromise]).finally(() => {
+          clearTimeout(timer);
+        });
+      }
+
+      function uploadResultToReference(attachment, uploadResult, referenceHelpers) {
+        const fileId = cleanText(
+          uploadResult?.fileId ||
+            uploadResult?.file_id ||
+            uploadResult?.id ||
+            uploadResult?.path,
+        );
+        if (!fileId) {
+          throw new Error(
+            `Tabbit upload did not return a file id for '${
+              attachment?.filename || "attachment"
+            }'.`,
+          );
+        }
+
+        const title = cleanText(
+          uploadResult?.fileName ||
+            uploadResult?.filename ||
+            uploadResult?.name ||
+            attachment?.filename,
+        );
+        const url = cleanText(uploadResult?.url || uploadResult?.fileUrl || "");
+
+        if (
+          attachment?.kind === "image" &&
+          typeof referenceHelpers?.rf === "function"
+        ) {
+          const reference = referenceHelpers.rf(title, url, fileId);
+          return attachment.sourceUrl
+            ? { ...reference, sourceUrl: attachment.sourceUrl }
+            : reference;
+        }
+
+        if (
+          attachment?.kind !== "image" &&
+          typeof referenceHelpers?.vT === "function"
+        ) {
+          return referenceHelpers.vT(title, fileId);
+        }
+
+        if (attachment?.kind === "image") {
+          return {
+            id: `${Date.now() + Math.floor(Math.random() * 1_000_000)}`,
+            type: "image",
+            title,
+            content: url,
+            favicon: "",
+            path: fileId,
+            ...(attachment.sourceUrl ? { sourceUrl: attachment.sourceUrl } : {}),
+          };
+        }
+
+        return {
+          id: `${Date.now() + Math.floor(Math.random() * 1_000_000)}`,
+          type: "document",
+          title,
+          content: "",
+          path: fileId,
+        };
+      }
+
+      async function uploadAttachments(runtime, attachmentList, uploadTimeoutMs) {
+        if (!Array.isArray(attachmentList) || attachmentList.length === 0) {
+          return [];
+        }
+
+        let uploadFile;
+        try {
+          uploadFile = runtime(68886).w;
+        } catch {
+          uploadFile = null;
+        }
+
+        if (typeof uploadFile !== "function") {
+          throw new Error("Unable to find Tabbit attachment upload function.");
+        }
+
+        let referenceHelpers;
+        try {
+          referenceHelpers = runtime(45677);
+        } catch {
+          referenceHelpers = null;
+        }
+
+        const references = [];
+        for (const attachment of attachmentList) {
+          if (!attachment?.bytes) {
+            throw new Error(
+              `Attachment '${attachment?.filename || "attachment"}' has no upload bytes.`,
+            );
+          }
+
+          const file = new File([bytesFromBase64(attachment.bytes)], attachment.filename, {
+            type: attachment.mimeType || "application/octet-stream",
+          });
+          const uploadResult = await withTimeout(
+            uploadFile(file, {
+              fileCategory: attachment.kind === "image" ? "image" : "document",
+            }),
+            uploadTimeoutMs,
+            `Uploading attachment '${attachment.filename}'`,
+          );
+
+          if (!uploadResult || uploadResult.success === false) {
+            throw new Error(
+              uploadResult?.error ||
+                uploadResult?.message ||
+                `Tabbit upload failed for '${attachment.filename}'.`,
+            );
+          }
+
+          references.push(
+            uploadResultToReference(attachment, uploadResult, referenceHelpers),
+          );
+        }
+
+        return references;
       }
 
       function findLatestAssistant(messages) {
@@ -657,6 +861,34 @@ async function sendUsingPageModule(
         return assistant?.messages?.some((entry) => entry?.type === "login") || false;
       }
 
+      function summarizeStateMessages(messages, references) {
+        return JSON.stringify({
+          reference_count: references.length,
+          messages: (messages || []).slice(-3).map((message) => ({
+            type: message?.type || null,
+            status: message?.status || null,
+            generating: Boolean(message?.generating),
+            content_type: typeof message?.content,
+            content_preview:
+              typeof message?.content === "string"
+                ? message.content.slice(0, 160)
+                : "",
+            nested_types: Array.isArray(message?.messages)
+              ? message.messages.slice(-5).map((entry) => ({
+                  type: entry?.type || null,
+                  status: entry?.status || null,
+                  code: entry?.code || null,
+                  content_type: typeof entry?.content,
+                  content_preview:
+                    typeof entry?.content === "string"
+                      ? entry.content.slice(0, 160)
+                      : "",
+                }))
+              : [],
+          })),
+        });
+      }
+
       const runtime = captureWebpackRequire();
       const sendMessage = runtime(51523)._;
       const modes = runtime(96164).R7;
@@ -772,13 +1004,17 @@ async function sendUsingPageModule(
         });
       }, timeoutMs);
 
+      let references = [];
       const delayFailure = (kind, detail) => {
         setTimeout(() => {
           if (!finishFromState(kind)) {
             settle({
               ok: false,
               error: kind,
-              detail,
+              detail: `${detail}\nState: ${summarizeStateMessages(
+                state.messages,
+                references,
+              )}`,
               partialText: collectAssistantText(findLatestAssistant(state.messages)),
             });
           }
@@ -786,11 +1022,29 @@ async function sendUsingPageModule(
       };
 
       try {
+        const uploadTimeoutMs = Math.min(
+          Math.max(15_000, Math.floor(timeoutMs / 3)),
+          60_000,
+        );
+        references = await uploadAttachments(runtime, attachments, uploadTimeoutMs);
+      } catch (error) {
+        settle({
+          ok: false,
+          error: "invalid_request",
+          detail:
+            error instanceof Error
+              ? error.message
+              : `Attachment upload failed: ${stringifyDetail(error)}`,
+        });
+        return done;
+      }
+
+      try {
         const maybePromise = sendMessage({
           messageId: null,
           message: prompt,
           originHTML: "",
-          references: [],
+          references,
           sessionId: "",
           model: selectedModel,
           selectedModels: [selectedModel],
@@ -845,16 +1099,24 @@ async function sendUsingPageModule(
         });
       }
 
-      return done;
-    },
-    {
-      prompt,
-      selectedModel,
-      timeoutMs,
-      models,
-      streamBridgeName: streamId,
-    },
-  );
+        return done;
+      },
+      {
+        prompt,
+        selectedModel,
+        timeoutMs,
+        models,
+        streamBridgeName: streamId,
+        attachments,
+      },
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      error: "send_threw",
+      detail: serializeError(error),
+    };
+  }
 }
 
 export async function getTabbitModels() {
@@ -942,6 +1204,7 @@ export async function sendPromptToTabbit({
   model,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   onDelta,
+  attachments = [],
 }) {
   return runExclusively(async () => {
     const requestedModelAlias = normalizeRequestedModelId(model);
@@ -976,6 +1239,20 @@ export async function sendPromptToTabbit({
       return routePlan.result;
     }
 
+    let materializedAttachments;
+    try {
+      materializedAttachments = await materializeAttachmentsForUpload(attachments);
+    } catch (error) {
+      return {
+        ok: false,
+        error: "invalid_request",
+        detail: error instanceof Error ? error.message : String(error),
+        requestedModelAlias: routePlan.requestedModelAlias,
+        attemptedModels: [],
+        fallbackHappened: false,
+      };
+    }
+
     const attemptedModels = [];
 
     for (let index = 0; index < routePlan.attempts.length; index += 1) {
@@ -999,6 +1276,7 @@ export async function sendPromptToTabbit({
           timeoutMs,
           models: rawModels,
           onDelta,
+          attachments: materializedAttachments,
         });
       }
 
