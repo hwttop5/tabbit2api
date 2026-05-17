@@ -193,9 +193,10 @@ async function handleOpenAiResponses(req, res, deps) {
     metadata: {
       ...normalizeRequestMetadata(body.metadata),
       requested_model_alias: body.model || "tabbit/priority",
-      attempted_models:
-        sessionResult.attemptedModels || [sessionResult.selectedModel || body.model],
-      fallback_happened: Boolean(sessionResult.fallbackHappened),
+      attempted_models: (
+        sessionResult.attemptedModels || [sessionResult.selectedModel || body.model]
+      ).join(","),
+      fallback_happened: String(Boolean(sessionResult.fallbackHappened)),
     },
   };
 

@@ -109,9 +109,14 @@ export function buildTextResponse(body, text, model) {
   return baseResponse(body, model, [createTextItem(text)]);
 }
 
-function writeSseEvent(res, event, data) {
+function writeSseEvent(res, event, data, sequenceNumber) {
+  const payload = {
+    type: event,
+    sequence_number: sequenceNumber,
+    ...data,
+  };
   res.write(`event: ${event}\n`);
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
 function splitTextChunks(text) {
@@ -124,6 +129,12 @@ export function createTextResponseStream(res, body, model) {
   let started = false;
   let emittedText = "";
   let ended = false;
+  let sequenceNumber = 0;
+
+  function nextSequenceNumber() {
+    sequenceNumber += 1;
+    return sequenceNumber;
+  }
 
   function ensureStarted() {
     if (started || ended) {
@@ -142,8 +153,18 @@ export function createTextResponseStream(res, body, model) {
       output: [],
     };
 
-    writeSseEvent(res, "response.created", pendingResponse);
-    writeSseEvent(res, "response.in_progress", pendingResponse);
+    writeSseEvent(
+      res,
+      "response.created",
+      { response: pendingResponse },
+      nextSequenceNumber(),
+    );
+    writeSseEvent(
+      res,
+      "response.in_progress",
+      { response: pendingResponse },
+      nextSequenceNumber(),
+    );
     writeSseEvent(res, "response.output_item.added", {
       response_id: response.id,
       output_index: 0,
@@ -154,7 +175,7 @@ export function createTextResponseStream(res, body, model) {
         status: "in_progress",
         content: [],
       },
-    });
+    }, nextSequenceNumber());
     writeSseEvent(res, "response.content_part.added", {
       response_id: response.id,
       output_index: 0,
@@ -165,7 +186,7 @@ export function createTextResponseStream(res, body, model) {
         text: "",
         annotations: [],
       },
-    });
+    }, nextSequenceNumber());
 
     started = true;
   }
@@ -183,7 +204,8 @@ export function createTextResponseStream(res, body, model) {
       item_id: itemId,
       content_index: 0,
       delta,
-    });
+      logprobs: [],
+    }, nextSequenceNumber());
   }
 
   function appendMissingText(finalText) {
@@ -224,20 +246,26 @@ export function createTextResponseStream(res, body, model) {
       item_id: itemId,
       content_index: 0,
       text: emittedText,
-    });
+      logprobs: [],
+    }, nextSequenceNumber());
     writeSseEvent(res, "response.content_part.done", {
       response_id: response.id,
       output_index: 0,
       item_id: itemId,
       content_index: 0,
       part: item.content[0],
-    });
+    }, nextSequenceNumber());
     writeSseEvent(res, "response.output_item.done", {
       response_id: response.id,
       output_index: 0,
       item,
-    });
-    writeSseEvent(res, "response.completed", completedResponse);
+    }, nextSequenceNumber());
+    writeSseEvent(
+      res,
+      "response.completed",
+      { response: completedResponse },
+      nextSequenceNumber(),
+    );
     ended = true;
     res.end();
   }
@@ -256,7 +284,12 @@ export function createTextResponseStream(res, body, model) {
         type: "api_error",
       },
     };
-    writeSseEvent(res, "response.failed", failedResponse);
+    writeSseEvent(
+      res,
+      "response.failed",
+      { response: failedResponse },
+      nextSequenceNumber(),
+    );
     ended = true;
     res.end();
   }

@@ -389,6 +389,48 @@ test("POST /v1/responses preserves OpenAI wire shape", async () => {
   }
 });
 
+test("POST /v1/responses stream emits OpenAI SDK compatible events", async () => {
+  const { server, baseUrl } = await startServer();
+  try {
+    const response = await fetch(`${baseUrl}/v1/responses`, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer test-key",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "tabbit/priority",
+        input: "hello",
+        stream: true,
+      }),
+    });
+
+    const text = await response.text();
+    const eventPayloads = text
+      .split("\n\n")
+      .filter(Boolean)
+      .map((chunk) => {
+        const dataLine = chunk
+          .split("\n")
+          .find((line) => line.startsWith("data: "));
+        return JSON.parse(dataLine.slice("data: ".length));
+      });
+
+    assert.equal(response.status, 200);
+    assert.equal(eventPayloads[0].type, "response.created");
+    assert.equal(eventPayloads[0].sequence_number, 1);
+    assert.equal(eventPayloads[0].response.object, "response");
+    assert.equal(eventPayloads[0].response.status, "in_progress");
+    assert.equal(eventPayloads[2].type, "response.output_item.added");
+    assert.equal(eventPayloads[4].type, "response.output_text.delta");
+    assert.equal(eventPayloads[4].logprobs.length, 0);
+    assert.equal(eventPayloads.at(-1).type, "response.completed");
+    assert.equal(eventPayloads.at(-1).response.status, "completed");
+  } finally {
+    await stopServer(server);
+  }
+});
+
 test("POST /v1/chat/completions returns OpenAI chat completion shape", async () => {
   const { server, baseUrl } = await startServer();
   try {
