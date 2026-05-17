@@ -8,15 +8,18 @@
     "commitlint": "commitlint --edit",
     "login": "node src/login.js",
     "probe": "node src/probe.js",
-    "start": "node src/gateway.js"
+    "start": "node src/gateway.js",
+    "test": "node --test"
   },
   "license": "GPL-3.0-only",
   "dependencies": {
-    "playwright": "^1.60.0"
+    "@anthropic-ai/tokenizer": "^0.0.4",
+    "playwright": "^1.60.0",
+    "ws": "^8.20.1"
   },
   "devDependencies": {
-    "@commitlint/config-conventional": "^19.8.1",
     "@commitlint/cli": "^19.8.1",
+    "@commitlint/config-conventional": "^19.8.1",
     "husky": "^9.1.7"
   }
 }

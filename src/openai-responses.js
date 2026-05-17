@@ -105,6 +105,10 @@ function baseResponse(body, model, output) {
   };
 }
 
+export function buildTextResponse(body, text, model) {
+  return baseResponse(body, model, [createTextItem(text)]);
+}
+
 function writeSseEvent(res, event, data) {
   res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(data)}\n\n`);
