@@ -20,6 +20,9 @@ export const LAB_ROOT =
   process.env.TABBIT_LAB_ROOT || path.join(process.cwd(), ".lab");
 
 export const LAB_PROFILE_DIR = path.join(LAB_ROOT, "tabbit-user-data");
+export const OPENAI_ASSISTANTS_STATE_PATH =
+  process.env.TABBIT_ASSISTANTS_STATE_PATH ||
+  path.join(LAB_ROOT, "openai-assistants-state.json");
 export const OUTPUT_DIR = path.join(process.cwd(), "output", "playwright");
 export const TABBIT_CHAT_URL = "https://web.tabbitbrowser.com/chat/new";
 export const TABBIT_MODELS_URL =
