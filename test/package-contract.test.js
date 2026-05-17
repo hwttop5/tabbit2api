@@ -16,8 +16,22 @@ test("package metadata exposes the npm CLI and publish whitelist", async () => {
     "README.md",
     "LICENSE",
     "CONTRIBUTING.md",
-    "examples/hermes/config.yaml.example",
+    "examples/",
   ]);
   assert.equal("prepare" in pkg.scripts, false);
   assert.equal(pkg.scripts["hooks:install"], "husky");
+
+  const exampleFiles = [
+    "examples/README.md",
+    "examples/codex/config.toml.example",
+    "examples/claude-code/env.powershell.example",
+    "examples/claude-code/env.sh.example",
+    "examples/openclaw/env.powershell.example",
+    "examples/openclaw/env.sh.example",
+    "examples/hermes/config.yaml.example",
+  ];
+
+  for (const file of exampleFiles) {
+    await fs.access(file);
+  }
 });

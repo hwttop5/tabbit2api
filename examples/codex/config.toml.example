@@ -1,0 +1,17 @@
+# Codex Desktop / Codex CLI provider snippet for Tabbit2API.
+# Copy the provider block into your Codex config.toml, then select the
+# tabbit2api provider as your active model_provider.
+#
+# Windows: C:\Users\<you>\.codex\config.toml
+# macOS/Linux: ~/.codex/config.toml
+
+model_provider = "tabbit2api"
+model = "tabbit/priority"
+disable_response_storage = true
+
+[model_providers.tabbit2api]
+name = "Tabbit2API Local"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "http://127.0.0.1:50124/v1"
+env_key = "TABBIT_API_KEY"

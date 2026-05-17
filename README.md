@@ -605,6 +605,9 @@ Model: tabbit/priority
 ```
 
 如果不经过 cc-switch，也可以在支持自定义 OpenAI Responses provider 的 Codex 配置里填写同样的 Base URL、API key 和 model。
+仓库内也提供了 Codex provider 片段示例：
+
+- [examples/codex/config.toml.example](examples/codex/config.toml.example)
 
 ### Claude Code
 
@@ -626,6 +629,11 @@ $env:ANTHROPIC_MODEL = "tabbit/priority"
 claude
 ```
 
+仓库内也提供了环境变量示例：
+
+- [examples/claude-code/env.powershell.example](examples/claude-code/env.powershell.example)
+- [examples/claude-code/env.sh.example](examples/claude-code/env.sh.example)
+
 Claude Code 工具兼容说明：
 
 - 本地编辑、Shell、MCP 等客户端工具由 Claude Code 执行，网关只返回 `tool_use`
@@ -645,6 +653,10 @@ Model: tabbit/priority
 ```
 
 OpenClaw 的本地工具或 MCP 工具仍由 OpenClaw 客户端执行；网关只负责返回 Anthropic 风格的 `tool_use`，并在下一轮接收 `tool_result`。如果 OpenClaw 支持直接填写 Anthropic Base URL，也使用 `http://127.0.0.1:50124`，不要附加 `/v1`。
+仓库内也提供了环境变量示例：
+
+- [examples/openclaw/env.powershell.example](examples/openclaw/env.powershell.example)
+- [examples/openclaw/env.sh.example](examples/openclaw/env.sh.example)
 
 ### Hermes Agent
 
@@ -887,8 +899,17 @@ test/
   gateway-contract.test.js HTTP 与协议契约测试
   package-contract.test.js npm 包元数据契约测试
 examples/
+  README.md                示例目录索引
+  codex/
+    config.toml.example    Codex provider 示例片段
+  claude-code/
+    env.powershell.example Claude Code PowerShell 环境变量示例
+    env.sh.example         Claude Code POSIX shell 环境变量示例
   hermes/
     config.yaml.example    Hermes Agent 示例配置
+  openclaw/
+    env.powershell.example OpenClaw PowerShell 环境变量示例
+    env.sh.example         OpenClaw POSIX shell 环境变量示例
 ```
 
 ## 当前限制
