@@ -1,29 +1,105 @@
 import os from "node:os";
 import path from "node:path";
 
-export const TABBIT_EXECUTABLE =
-  process.env.TABBIT_EXECUTABLE ||
-  path.join(
-    os.homedir(),
-    "AppData",
-    "Local",
+function pathForPlatform(platform) {
+  return platform === "win32" ? path.win32 : path.posix;
+}
+
+export function defaultTabbitExecutable({
+  platform = process.platform,
+  homeDir = os.homedir(),
+} = {}) {
+  const platformPath = pathForPlatform(platform);
+
+  if (platform === "win32") {
+    return platformPath.join(
+      homeDir,
+      "AppData",
+      "Local",
+      "Tabbit",
+      "Application",
+      "Tabbit.exe",
+    );
+  }
+
+  if (platform === "darwin") {
+    return "/Applications/Tabbit.app/Contents/MacOS/Tabbit";
+  }
+
+  return "tabbit";
+}
+
+export function defaultTabbitUserDataDir({
+  env = process.env,
+  platform = process.platform,
+  homeDir = os.homedir(),
+} = {}) {
+  const platformPath = pathForPlatform(platform);
+
+  if (platform === "win32") {
+    return platformPath.join(homeDir, "AppData", "Local", "Tabbit", "User Data");
+  }
+
+  if (platform === "darwin") {
+    return platformPath.join(
+      homeDir,
+      "Library",
+      "Application Support",
+      "Tabbit",
+      "User Data",
+    );
+  }
+
+  return platformPath.join(
+    env.XDG_CONFIG_HOME || platformPath.join(homeDir, ".config"),
     "Tabbit",
-    "Application",
-    "Tabbit.exe",
+    "User Data",
   );
+}
+
+export function defaultAppDataRoot({
+  env = process.env,
+  platform = process.platform,
+  homeDir = os.homedir(),
+} = {}) {
+  const platformPath = pathForPlatform(platform);
+
+  if (platform === "win32") {
+    return platformPath.join(
+      env.LOCALAPPDATA || platformPath.join(homeDir, "AppData", "Local"),
+      "tabbit2api",
+    );
+  }
+
+  if (platform === "darwin") {
+    return platformPath.join(
+      homeDir,
+      "Library",
+      "Application Support",
+      "tabbit2api",
+    );
+  }
+
+  return platformPath.join(
+    env.XDG_DATA_HOME || platformPath.join(homeDir, ".local", "share"),
+    "tabbit2api",
+  );
+}
+
+export const TABBIT_EXECUTABLE =
+  process.env.TABBIT_EXECUTABLE || defaultTabbitExecutable();
 
 export const TABBIT_USER_DATA_DIR =
-  process.env.TABBIT_USER_DATA_DIR ||
-  path.join(os.homedir(), "AppData", "Local", "Tabbit", "User Data");
+  process.env.TABBIT_USER_DATA_DIR || defaultTabbitUserDataDir();
 
-export const LAB_ROOT =
-  process.env.TABBIT_LAB_ROOT || path.join(process.cwd(), ".lab");
+export const LAB_ROOT = process.env.TABBIT_LAB_ROOT || defaultAppDataRoot();
 
 export const LAB_PROFILE_DIR = path.join(LAB_ROOT, "tabbit-user-data");
 export const OPENAI_ASSISTANTS_STATE_PATH =
   process.env.TABBIT_ASSISTANTS_STATE_PATH ||
   path.join(LAB_ROOT, "openai-assistants-state.json");
-export const OUTPUT_DIR = path.join(process.cwd(), "output", "playwright");
+export const OUTPUT_DIR =
+  process.env.TABBIT_OUTPUT_DIR || path.join(LAB_ROOT, "output", "playwright");
 export const TABBIT_CHAT_URL = "https://web.tabbitbrowser.com/chat/new";
 export const TABBIT_MODELS_URL =
   "https://web.tabbitbrowser.com/proxy/v1/model_config/models?a=0";

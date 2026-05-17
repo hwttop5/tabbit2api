@@ -82,6 +82,10 @@ async function pathExists(targetPath) {
   }
 }
 
+export async function hasLabProfile(labProfileDir) {
+  return pathExists(path.join(labProfileDir, "Default"));
+}
+
 export async function prepareLabProfile({
   sourceUserDataDir,
   labProfileDir,
@@ -119,7 +123,11 @@ export async function prepareLabProfile({
     }
   }
 
-  await copyPath(defaultSourceDir, defaultTargetDir, DEFAULT_EXCLUDES);
+  if (await pathExists(defaultSourceDir)) {
+    await copyPath(defaultSourceDir, defaultTargetDir, DEFAULT_EXCLUDES);
+  } else {
+    await fs.mkdir(defaultTargetDir, { recursive: true });
+  }
 
   for (const lockName of ["LOCK", "lockfile"]) {
     await removeIfExists(path.join(labProfileDir, lockName));

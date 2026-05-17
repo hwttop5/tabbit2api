@@ -3,12 +3,22 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Tabbit to OpenAI Responses-compatible gateway for local agent integrations.",
+  "bin": {
+    "tabbit2api": "./src/cli.js"
+  },
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE",
+    "CONTRIBUTING.md",
+    "hermes-home/config.yaml"
+  ],
   "scripts": {
-    "prepare": "husky",
+    "hooks:install": "husky",
     "commitlint": "commitlint --edit",
-    "login": "node src/login.js",
-    "probe": "node src/probe.js",
-    "start": "node src/gateway.js",
+    "login": "node src/cli.js login",
+    "probe": "node src/cli.js probe",
+    "start": "node src/cli.js start",
     "test": "node --test"
   },
   "license": "GPL-3.0-only",

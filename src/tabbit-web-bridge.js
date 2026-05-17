@@ -953,7 +953,7 @@ export async function sendPromptToTabbit({
         ok: false,
         error: "login_required",
         detail:
-          "The local Tabbit runtime profile is not logged in. Run `npm run login` and sign in once inside the login browser window.",
+          "The local Tabbit runtime profile is not logged in. Run `tabbit2api login` and sign in once inside the login browser window.",
         requestedModelAlias,
         attemptedModels: [],
         fallbackHappened: false,

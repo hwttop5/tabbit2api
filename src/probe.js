@@ -1,3 +1,5 @@
+import { pathToFileURL } from "node:url";
+
 import {
   LAB_PROFILE_DIR,
   TABBIT_CHAT_URL,
@@ -10,7 +12,7 @@ import {
   saveProbeArtifacts,
 } from "./tabbit-session.js";
 
-async function inspectChatPage(page) {
+export async function inspectChatPage(page) {
   return page.evaluate(async () => {
     const tabSignin = globalThis.chrome?.tabSignin;
     const tabChatExt = globalThis.chrome?.tabChatExt;
@@ -38,8 +40,8 @@ async function inspectChatPage(page) {
   });
 }
 
-async function main() {
-  const forceRefresh = process.argv.includes("--refresh");
+export async function runProbe(options = {}) {
+  const forceRefresh = Boolean(options.refresh);
   const profile = await prepareLabProfile({
     sourceUserDataDir: TABBIT_USER_DATA_DIR,
     labProfileDir: LAB_PROFILE_DIR,
@@ -66,13 +68,21 @@ async function main() {
       ),
     );
   } finally {
-    if (!process.argv.includes("--keep-open")) {
+    if (!options.keepOpen) {
       await context.close();
     }
   }
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  runProbe({
+    keepOpen: process.argv.includes("--keep-open"),
+    refresh: process.argv.includes("--refresh"),
+  }).catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
