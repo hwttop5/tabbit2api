@@ -16,7 +16,7 @@ test("package metadata exposes the npm CLI and publish whitelist", async () => {
     "README.md",
     "LICENSE",
     "CONTRIBUTING.md",
-    "hermes-home/config.yaml",
+    "examples/hermes/config.yaml.example",
   ]);
   assert.equal("prepare" in pkg.scripts, false);
   assert.equal(pkg.scripts["hooks:install"], "husky");

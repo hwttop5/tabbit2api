@@ -657,9 +657,9 @@ API Key: sk-tabbit-local
 Model: tabbit/priority
 ```
 
-如果 Hermes Agent 不走 cc-switch，也可以直接使用仓库内示例配置：
+如果 Hermes Agent 不走 cc-switch，也可以参考仓库内示例配置：
 
-- [hermes-home/config.yaml](hermes-home/config.yaml)
+- [examples/hermes/config.yaml.example](examples/hermes/config.yaml.example)
 
 关键配置如下：
 
@@ -675,6 +675,8 @@ model:
 使用方式示例：
 
 ```powershell
+New-Item -ItemType Directory -Force .\hermes-home | Out-Null
+Copy-Item .\examples\hermes\config.yaml.example .\hermes-home\config.yaml
 $env:HERMES_HOME = (Resolve-Path .\hermes-home).Path
 python path\to\hermes-agent\cli.py
 ```
@@ -884,8 +886,9 @@ test/
   cli-options.test.js      CLI 参数契约测试
   gateway-contract.test.js HTTP 与协议契约测试
   package-contract.test.js npm 包元数据契约测试
-hermes-home/
-  config.yaml              Hermes Agent 示例配置
+examples/
+  hermes/
+    config.yaml.example    Hermes Agent 示例配置
 ```
 
 ## 当前限制

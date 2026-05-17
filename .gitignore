@@ -1,6 +1,7 @@
 .lab/
 .lab-auth-verify/
 .lab-verify/
+hermes-home/
 node_modules/
 output/
 *.log

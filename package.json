@@ -11,7 +11,7 @@
     "README.md",
     "LICENSE",
     "CONTRIBUTING.md",
-    "hermes-home/config.yaml"
+    "examples/hermes/config.yaml.example"
   ],
   "scripts": {
     "hooks:install": "husky",
