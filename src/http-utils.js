@@ -17,7 +17,7 @@ export function readJson(req) {
 
 export function writeJson(res, statusCode, payload, headers = {}) {
   res.writeHead(statusCode, {
-    "content-type": "application/json",
+    "content-type": "application/json; charset=utf-8",
     ...headers,
   });
   res.end(JSON.stringify(payload));

@@ -395,6 +395,7 @@ test("POST /v1/responses preserves OpenAI wire shape", async () => {
     });
 
     assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type"), /charset=utf-8/);
     assert.equal(body.object, "response");
     assert.equal(body.output[0].type, "message");
   } finally {
@@ -1200,6 +1201,292 @@ test("parseStructuredEnvelope accepts fenced JSON", () => {
   assert.equal(parsed.contentBlocks[0].type, "tool_use");
 });
 
+test("parseStructuredEnvelope unwraps nested JSON text envelopes", () => {
+  const nested = JSON.stringify({
+    stop_reason: "end_turn",
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          stop_reason: "end_turn",
+          content: [{ type: "text", text: "image was read" }],
+        }),
+      },
+    ],
+  });
+
+  const parsed = parseStructuredEnvelope(nested);
+  assert.equal(parsed.stopReason, "end_turn");
+  assert.deepEqual(parsed.contentBlocks, [
+    { type: "text", text: "image was read" },
+  ]);
+});
+
+test("parseStructuredEnvelope accepts escaped dollar signs from Tabbit JSON", () => {
+  const parsed = parseStructuredEnvelope(
+    '{"stop_reason":"end_turn","content":[{"type":"text","text":"Cost is \\$1.00"}]}',
+  );
+
+  assert.equal(parsed.stopReason, "end_turn");
+  assert.deepEqual(parsed.contentBlocks, [
+    { type: "text", text: "Cost is $1.00" },
+  ]);
+});
+
+test("buildStructuredPrompt hides vision_analyze when native attachments exist", () => {
+  const normalized = normalizeOpenAiRequest({
+    model: "tabbit/priority",
+    input: [
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: "Describe this image." },
+          { type: "input_image", image_url: tinyPngDataUrl },
+        ],
+      },
+    ],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "vision_analyze",
+          description: "Analyze an image using an auxiliary vision service.",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+      {
+        type: "function",
+        function: {
+          name: "other_tool",
+          description: "Another client tool.",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+    ],
+  });
+
+  const prompt = buildStructuredPrompt(normalized);
+  assert.doesNotMatch(prompt, /"name": "vision_analyze"/);
+  assert.match(prompt, /"name": "other_tool"/);
+  assert.match(prompt, /Unavailable client tools for this turn/);
+  assert.match(prompt, /native attachment directly/);
+  assert.doesNotMatch(prompt, /Do not call vision_analyze/);
+});
+
+test("buildStructuredPrompt removes Hermes vision helper hints for native attachments", () => {
+  const normalized = normalizeOpenAiRequest({
+    model: "tabbit/priority",
+    input: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text:
+              "图片测试\n\n[Image attached at: /home/ttop5/.hermes/cache/images/img_abc.jpg]",
+          },
+          { type: "input_image", image_url: tinyPngDataUrl },
+        ],
+      },
+    ],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "read_file",
+          description:
+            "Read text files. NOTE: Cannot read images or binary files — use vision_analyze for images.",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+    ],
+  });
+
+  const prompt = buildStructuredPrompt(normalized);
+  assert.doesNotMatch(prompt, /\/home\/ttop5\/\.hermes\/cache\/images/);
+  assert.doesNotMatch(prompt, /vision_analyze/);
+  assert.match(prompt, /Attachment is available as a native Tabbit reference/);
+  assert.match(prompt, /Native attachments in this turn are already available/);
+});
+
+test("runGatewaySession retries when Tabbit calls disabled vision tool for attachments", async () => {
+  const normalized = normalizeOpenAiRequest({
+    model: "tabbit/priority",
+    input: [
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: "Describe this image." },
+          { type: "input_image", image_url: tinyPngDataUrl },
+        ],
+      },
+    ],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "vision_analyze",
+          description: "Analyze an image using an auxiliary vision service.",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+    ],
+  });
+  const prompts = [];
+
+  const result = await runGatewaySession(normalized, {
+    sendPromptToTabbit: async ({ prompt }) => {
+      prompts.push(prompt);
+      if (prompts.length === 1) {
+        return {
+          ok: true,
+          text: JSON.stringify({
+            stop_reason: "tool_use",
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_vision",
+                name: "vision_analyze",
+                input: { image_url: "/tmp/image.png" },
+              },
+            ],
+          }),
+          gatewayModelId: "tabbit/priority",
+          attemptedModels: ["tabbit/priority"],
+          fallbackHappened: false,
+        };
+      }
+
+      return {
+        ok: true,
+        text: JSON.stringify({
+          stop_reason: "end_turn",
+          content: [{ type: "text", text: "I can read the native attachment." }],
+        }),
+        gatewayModelId: "tabbit/priority",
+        attemptedModels: ["tabbit/priority"],
+        fallbackHappened: false,
+      };
+    },
+    executeServerToolUse: async () => {
+      throw new Error("client vision tool must not be executed by the gateway");
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(prompts.length, 2);
+  assert.equal(result.contentBlocks.length, 1);
+  assert.equal(result.contentBlocks[0].type, "text");
+  assert.match(result.contentBlocks[0].text, /native attachment/);
+  assert.match(prompts[1], /unavailable for this turn/);
+});
+
+test("runGatewaySession retries attachment timeout fallback text", async () => {
+  const normalized = normalizeOpenAiRequest({
+    model: "tabbit/priority",
+    input: [
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: "图片测试" },
+          { type: "input_image", image_url: tinyPngDataUrl },
+        ],
+      },
+    ],
+  });
+  const prompts = [];
+
+  const result = await runGatewaySession(normalized, {
+    sendPromptToTabbit: async ({ prompt }) => {
+      prompts.push(prompt);
+      if (prompts.length === 1) {
+        return {
+          ok: true,
+          text: JSON.stringify({
+            stop_reason: "end_turn",
+            content: [
+              {
+                type: "text",
+                text:
+                  "图片接收到了,但自动分析超时了(30秒上游限制),所以我这边没拿到图像内容描述。",
+              },
+            ],
+          }),
+          gatewayModelId: "tabbit/priority",
+          attemptedModels: ["tabbit/priority"],
+          fallbackHappened: false,
+        };
+      }
+
+      return {
+        ok: true,
+        text: JSON.stringify({
+          stop_reason: "end_turn",
+          content: [{ type: "text", text: "图中是一张仪表盘截图。" }],
+        }),
+        gatewayModelId: "tabbit/priority",
+        attemptedModels: ["tabbit/priority"],
+        fallbackHappened: false,
+      };
+    },
+    executeServerToolUse: async () => {
+      throw new Error("should not execute server tools in this test");
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1], /previous answer incorrectly claimed/);
+  assert.equal(result.contentBlocks[0].text, "图中是一张仪表盘截图。");
+});
+
+test("runGatewaySession treats disabled vision tool as absent for text fallback", async () => {
+  const normalized = normalizeOpenAiRequest({
+    model: "tabbit/priority",
+    input: [
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: "Describe this image." },
+          { type: "input_image", image_url: tinyPngDataUrl },
+        ],
+      },
+    ],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "vision_analyze",
+          description: "Analyze an image using an auxiliary vision service.",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+    ],
+  });
+  let calls = 0;
+
+  const result = await runGatewaySession(normalized, {
+    sendPromptToTabbit: async () => {
+      calls += 1;
+      return {
+        ok: true,
+        text: "### Image content\nThe screenshot contains an error message.",
+        gatewayModelId: "tabbit/priority",
+        attemptedModels: ["tabbit/priority"],
+        fallbackHappened: false,
+      };
+    },
+    executeServerToolUse: async () => {
+      throw new Error("should not execute tools in this test");
+    },
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(result.ok, true);
+  assert.equal(result.contentBlocks[0].type, "text");
+  assert.match(result.contentBlocks[0].text, /screenshot contains/);
+});
+
 test("runGatewaySession executes server tool loop and returns final text", async () => {
   let calls = 0;
   const normalized = normalizeAnthropicRequest(
@@ -1259,6 +1546,33 @@ test("runGatewaySession executes server tool loop and returns final text", async
   assert.equal(result.ok, true);
   assert.equal(result.contentBlocks.at(-1).type, "text");
   assert.equal(result.usageEstimate.server_tool_use.web_search_requests, 1);
+});
+
+test("runGatewaySession repairs Latin-1 decoded UTF-8 text from Tabbit", async () => {
+  const normalized = normalizeOpenAiRequest({
+    model: "tabbit/priority",
+    input: "图片识别",
+  });
+  const mojibakeText = Buffer.from("图片识别成功", "utf8").toString("latin1");
+
+  const result = await runGatewaySession(normalized, {
+    sendPromptToTabbit: async () => ({
+      ok: true,
+      text: JSON.stringify({
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: mojibakeText }],
+      }),
+      gatewayModelId: "tabbit/priority",
+      attemptedModels: ["tabbit/priority"],
+      fallbackHappened: false,
+    }),
+    executeServerToolUse: async () => {
+      throw new Error("should not execute server tools in this test");
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.contentBlocks[0].text, "图片识别成功");
 });
 
 test("runGatewaySession passes attachments through every Tabbit prompt", async () => {
