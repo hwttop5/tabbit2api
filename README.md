@@ -194,11 +194,26 @@ $env:TABBIT_API_KEY = "your-local-key"
 {
   "status": "ok",
   "mode": "tabbit-web-bridge",
-  "runtimeInitialized": false
+  "runtimeInitialized": false,
+  "modelCache": {
+    "cached": false,
+    "modelCount": 0,
+    "expiresAt": null,
+    "ttlMs": 0
+  },
+  "queue": {
+    "active": 0,
+    "busy": false
+  },
+  "runtimeProfile": {
+    "labProfileDir": ".../tabbit2api/tabbit-user-data",
+    "defaultProfileDir": ""
+  },
+  "lastBridgeError": null
 }
 ```
 
-当运行时已初始化且页面可用时，还会附带页面状态、标题和登录态信息。
+当运行时已初始化且页面可用时，还会附带页面状态、标题和登录态信息。`runtimeProfile` 只返回简短路径摘要，不暴露完整本机路径。
 
 ### `GET /v1/models`
 

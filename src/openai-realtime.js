@@ -230,7 +230,31 @@ export function installRealtimeServer(server, options = {}) {
         max_completion_tokens: session.max_response_output_tokens,
       });
 
-      const sessionResult = await runGatewaySession(normalized);
+      if (typeof runGatewaySession !== "function") {
+        sendJson(
+          ws,
+          errorPayload(
+            "Realtime gateway session runner is not configured.",
+            "api_error",
+          ),
+        );
+        return;
+      }
+
+      let sessionResult;
+      try {
+        sessionResult = await runGatewaySession(normalized);
+      } catch (error) {
+        sendJson(
+          ws,
+          errorPayload(
+            error instanceof Error ? error.message : String(error),
+            "api_error",
+          ),
+        );
+        return;
+      }
+
       if (!sessionResult.ok) {
         sendJson(
           ws,

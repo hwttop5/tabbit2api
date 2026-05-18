@@ -5,6 +5,7 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { WebSocket } from "ws";
 
+import { startGateway } from "../src/gateway.js";
 import { createGatewayServer } from "../src/gateway-app.js";
 import {
   OpenAiAssistantsStore,
@@ -23,6 +24,10 @@ import {
   attachmentUploadResultToReference,
   classifyAttemptFailure,
 } from "../src/tabbit-web-bridge.js";
+import {
+  buildGatewayCatalogBundle,
+  resolveRoutePlan,
+} from "../src/tabbit-bridge-core.js";
 import {
   normalizeServerToolDefinition,
   executeServerToolUse,
@@ -118,6 +123,33 @@ async function stopServer(server) {
   });
 }
 
+async function startGatewayForTest(overrides = {}) {
+  const originalLog = console.log;
+  console.log = () => {};
+  let server;
+
+  try {
+    server = startGateway({
+      apiKey: "test-key",
+      host: "127.0.0.1",
+      port: 0,
+      ...overrides,
+    });
+    await new Promise((resolve, reject) => {
+      server.once("listening", resolve);
+      server.once("error", reject);
+    });
+  } finally {
+    console.log = originalLog;
+  }
+
+  const address = server.address();
+  return {
+    server,
+    baseUrl: `http://127.0.0.1:${address.port}`,
+  };
+}
+
 async function requestJson(url, options = {}) {
   const response = await fetch(url, options);
   const contentType = response.headers.get("content-type") || "";
@@ -198,6 +230,27 @@ test("GET /v1/models returns OpenAI shape by default", async () => {
     assert.equal(response.status, 200);
     assert.equal(body.object, "list");
     assert.equal(Array.isArray(body.data), true);
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("GET /health exposes bridge diagnostics without initializing Tabbit", async () => {
+  const server = createGatewayServer({ apiKey: "test-key" });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const { response, body } = await requestJson(`${baseUrl}/health`);
+
+    assert.equal(response.status, 200);
+    assert.equal(body.status, "ok");
+    assert.equal(body.runtimeInitialized, false);
+    assert.equal(body.modelCache.cached, false);
+    assert.equal(body.queue.busy, false);
+    assert.match(body.runtimeProfile.labProfileDir, /tabbit-user-data/);
+    assert.equal(body.lastBridgeError, null);
   } finally {
     await stopServer(server);
   }
@@ -855,6 +908,47 @@ test("Tabbit limit messages are classified as retryable upstream failures", () =
   );
 });
 
+test("bridge core preserves priority route catalog behavior", () => {
+  const bundle = buildGatewayCatalogBundle([
+    {
+      display_name: "GPT-5.5",
+      supports_images: true,
+      supports_tools: true,
+      support_thinking: false,
+      model_access_type: "premium",
+    },
+    {
+      display_name: "Custom Model",
+      supports_images: false,
+      supports_tools: true,
+      support_thinking: true,
+      model_access_type: "free",
+    },
+  ]);
+
+  assert.equal(bundle.models[0].id, "tabbit/priority");
+
+  const priority = resolveRoutePlan("priority", bundle);
+  assert.equal(priority.ok, true);
+  assert.equal(priority.kind, "priority_chain");
+  assert.equal(priority.attempts[0].gatewayModelId, "tabbit/Claude-Opus-4.7");
+  assert.equal(
+    priority.attempts.some((attempt) => attempt.gatewayModelId === "tabbit/GPT-5.5"),
+    true,
+  );
+
+  const direct = resolveRoutePlan("Custom Model", bundle);
+  assert.equal(direct.ok, true);
+  assert.equal(direct.kind, "direct");
+  assert.equal(direct.attempts[0].gatewayModelId, "tabbit/Custom Model");
+  assert.equal(direct.attempts[0].selectedModel, "Custom Model");
+
+  const unknown = resolveRoutePlan("missing-model", bundle);
+  assert.equal(unknown.ok, false);
+  assert.equal(unknown.result.error, "invalid_request");
+  assert.deepEqual(unknown.result.attemptedModels, []);
+});
+
 test("POST /v1/chat/completions maps client tool calls", async () => {
   const { server, baseUrl } = await startServer({
     runGatewaySession: async () => ({
@@ -1165,6 +1259,74 @@ test("Realtime WebSocket text session returns response events", async () => {
     );
     assert.equal(events.some((event) => event.type === "response.text.delta"), true);
     assert.equal(events.at(-1).type, "response.done");
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("startGateway wires Realtime to the configured session runner", async () => {
+  let capturedRequest;
+  const { server, baseUrl } = await startGatewayForTest({
+    runGatewaySession: async (normalized) => {
+      capturedRequest = normalized;
+      return {
+        ok: true,
+        contentBlocks: [{ type: "text", text: "hello from real start" }],
+        stopReason: "end_turn",
+        selectedModel: "tabbit/priority",
+        attemptedModels: ["tabbit/priority"],
+        fallbackHappened: false,
+        usageEstimate: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      };
+    },
+  });
+
+  try {
+    const events = await collectRealtimeEvents(
+      baseUrl,
+      [
+        {
+          type: "conversation.item.create",
+          item: {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "hello" }],
+          },
+        },
+        { type: "response.create" },
+      ],
+      { Authorization: "Bearer test-key" },
+    );
+
+    assert.equal(capturedRequest.protocol, "openai-chat-completions");
+    assert.equal(events.some((event) => event.type === "response.text.delta"), true);
+    assert.equal(events.at(-1).type, "response.done");
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("startGateway Realtime rejects missing auth", async () => {
+  const { server, baseUrl } = await startGatewayForTest({
+    runGatewaySession: async () => {
+      throw new Error("unauthorized connection should not invoke runner");
+    },
+  });
+
+  try {
+    const wsUrl = `${baseUrl.replace("http://", "ws://")}/v1/realtime?model=tabbit/priority`;
+    await assert.rejects(
+      () =>
+        new Promise((resolve, reject) => {
+          const ws = new WebSocket(wsUrl);
+          ws.once("open", () => {
+            ws.close();
+            resolve();
+          });
+          ws.once("error", reject);
+        }),
+      /Unexpected server response: 401/,
+    );
   } finally {
     await stopServer(server);
   }
