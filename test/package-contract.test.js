@@ -6,7 +6,7 @@ test("package metadata exposes the npm CLI and publish whitelist", async () => {
   const pkg = JSON.parse(await fs.readFile("package.json", "utf8"));
 
   assert.equal(pkg.name, "tabbit2api");
-  assert.equal(pkg.bin.tabbit2api, "./src/cli.js");
+  assert.equal(pkg.bin.tabbit2api, "src/cli.js");
   assert.equal(
     (await fs.readFile("src/cli.js", "utf8")).startsWith("#!/usr/bin/env node"),
     true,

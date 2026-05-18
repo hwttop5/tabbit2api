@@ -45,13 +45,13 @@ npm pack --dry-run --json --registry=https://registry.npmjs.org
 
 ```powershell
 npm pack --registry=https://registry.npmjs.org
-npm exec --yes --package .\\tabbit2api-0.1.0.tgz -- tabbit2api --version
+npm exec --yes --package .\\tabbit2api-<version>.tgz -- tabbit2api --version
 ```
 
 验证临时全局安装：
 
 ```powershell
-npm install -g --prefix "$env:TEMP\\tabbit2api-global" .\\tabbit2api-0.1.0.tgz
+npm install -g --prefix "$env:TEMP\\tabbit2api-global" .\\tabbit2api-<version>.tgz
 "$env:TEMP\\tabbit2api-global\\tabbit2api.cmd" doctor
 ```
 

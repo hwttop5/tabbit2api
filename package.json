@@ -1,6 +1,6 @@
 {
   "name": "tabbit2api",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Tabbit to OpenAI Responses-compatible gateway for local agent integrations.",
   "repository": {
@@ -28,7 +28,7 @@
     "registry": "https://registry.npmjs.org/"
   },
   "bin": {
-    "tabbit2api": "./src/cli.js"
+    "tabbit2api": "src/cli.js"
   },
   "files": [
     "src/",
