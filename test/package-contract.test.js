@@ -13,6 +13,7 @@ test("package metadata exposes the npm CLI and publish whitelist", async () => {
   );
   assert.deepEqual(pkg.files, [
     "src/",
+    "docs/",
     "README.md",
     "LICENSE",
     "CONTRIBUTING.md",
@@ -20,7 +21,27 @@ test("package metadata exposes the npm CLI and publish whitelist", async () => {
   ]);
   assert.equal("prepare" in pkg.scripts, false);
   assert.equal(pkg.scripts["hooks:install"], "husky");
+  assert.deepEqual(pkg.repository, {
+    type: "git",
+    url: "git+https://github.com/hwttop5/tabbit2api.git",
+  });
+  assert.deepEqual(pkg.bugs, {
+    url: "https://github.com/hwttop5/tabbit2api/issues",
+  });
+  assert.equal(pkg.homepage, "https://github.com/hwttop5/tabbit2api#readme");
+  assert.equal(pkg.engines.node, ">=18");
+  assert.deepEqual(pkg.publishConfig, {
+    access: "public",
+    registry: "https://registry.npmjs.org/",
+  });
+  assert.equal(Array.isArray(pkg.keywords), true);
+  assert.equal(pkg.keywords.includes("tabbit"), true);
 
+  const docFiles = [
+    "docs/api.md",
+    "docs/integrations.md",
+    "docs/publishing.md",
+  ];
   const exampleFiles = [
     "examples/README.md",
     "examples/codex/config.toml.example",
@@ -31,7 +52,7 @@ test("package metadata exposes the npm CLI and publish whitelist", async () => {
     "examples/hermes/config.yaml.example",
   ];
 
-  for (const file of exampleFiles) {
+  for (const file of [...docFiles, ...exampleFiles]) {
     await fs.access(file);
   }
 });

@@ -109,3 +109,11 @@ export const CHATGPTBOX_EXTENSION_ID = "eobbhoofkanlmddnplfhnmkfbnlhpbbo";
 
 export const MAXAI_POPUP_URL = `chrome-extension://${MAXAI_EXTENSION_ID}/pages/popup/index.html`;
 export const CHATGPTBOX_PANEL_URL = `chrome-extension://${CHATGPTBOX_EXTENSION_ID}/IndependentPanel.html`;
+
+export function summarizeEnvSource(name, fallbackValue, env = process.env) {
+  if (Object.hasOwn(env, name) && env[name]) {
+    return `${name}=${env[name]}`;
+  }
+
+  return `default (${fallbackValue})`;
+}

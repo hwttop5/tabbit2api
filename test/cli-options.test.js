@@ -5,9 +5,11 @@ import {
   DEFAULT_API_KEY,
   DEFAULT_HOST,
   DEFAULT_PORT,
+  HELP_TEXT,
   parseCliArgs,
   readPackageVersion,
 } from "../src/cli-options.js";
+import { collectDoctorReport, runDoctor } from "../src/doctor.js";
 import {
   defaultAppDataRoot,
   defaultTabbitExecutable,
@@ -22,6 +24,11 @@ test("CLI defaults to start command and documented gateway options", () => {
     help: false,
     host: DEFAULT_HOST,
     keepOpen: false,
+    optionSources: {
+      apiKey: `default:${DEFAULT_API_KEY}`,
+      host: `default:${DEFAULT_HOST}`,
+      port: `default:${DEFAULT_PORT}`,
+    },
     port: DEFAULT_PORT,
     refresh: false,
     version: false,
@@ -54,6 +61,9 @@ test("CLI supports login and probe subcommands", () => {
   assert.equal(login.command, "login");
   assert.equal(login.refresh, true);
 
+  const doctor = parseCliArgs(["doctor"], {});
+  assert.equal(doctor.command, "doctor");
+
   const probe = parseCliArgs(["probe", "--keep-open"], {});
   assert.equal(probe.command, "probe");
   assert.equal(probe.keepOpen, true);
@@ -69,12 +79,17 @@ test("CLI environment values are defaults and flags override them", () => {
   assert.equal(parsed.host, "0.0.0.0");
   assert.equal(parsed.port, 50125);
   assert.equal(parsed.apiKey, "flag-key");
+  assert.equal(parsed.optionSources.host, "env:HOST");
+  assert.equal(parsed.optionSources.port, "flag:--port");
+  assert.equal(parsed.optionSources.apiKey, "flag:--api-key");
 });
 
 test("CLI detects help and version", () => {
   assert.equal(parseCliArgs(["--help"], {}).help, true);
   assert.equal(parseCliArgs(["--version"], {}).version, true);
   assert.match(readPackageVersion(), /^\d+\.\d+\.\d+/);
+  assert.match(HELP_TEXT, /tabbit2api doctor/);
+  assert.match(HELP_TEXT, /Examples:/);
 });
 
 test("CLI rejects unknown commands, unknown options, and invalid ports", () => {
@@ -144,7 +159,10 @@ test("platform defaults keep Linux as manual fallback", () => {
 test("start waits for login before launching when runtime profile is missing", async () => {
   const calls = [];
   const originalLog = console.log;
-  console.log = () => {};
+  const logs = [];
+  console.log = (message) => {
+    logs.push(message);
+  };
 
   try {
     await runStart(
@@ -177,6 +195,8 @@ test("start waits for login before launching when runtime profile is missing", a
     ["runLogin", { refresh: false, waitForLogin: true }],
     ["startGateway", { apiKey: "test-key", host: "127.0.0.1", port: 50124 }],
   ]);
+  assert.match(logs.join("\n"), /did not find a runtime profile/);
+  assert.match(logs.join("\n"), /tabbit2api doctor/);
 });
 
 test("start launches directly when runtime profile already exists", async () => {
@@ -203,4 +223,85 @@ test("start launches directly when runtime profile already exists", async () => 
   assert.deepEqual(calls, [
     ["startGateway", { apiKey: "test-key", host: "127.0.0.1", port: 50124 }],
   ]);
+});
+
+test("doctor collects filesystem checks and marks health unreachable when gateway is down", async () => {
+  const env = {
+    HOST: "127.0.0.1",
+    PORT: "50124",
+    TABBIT_API_KEY: "doctor-key",
+  };
+
+  const report = await collectDoctorReport(
+    {},
+    env,
+    {
+      checkHealth: async () => ({
+        reachable: false,
+        statusCode: null,
+        runtimeInitialized: null,
+        error: "connect ECONNREFUSED",
+      }),
+      hasLabProfile: async () => false,
+    },
+  );
+  assert.equal(typeof report.tabbitExecutable.exists, "boolean");
+  assert.equal(typeof report.tabbitUserData.exists, "boolean");
+  assert.equal(report.runtime.profileExists, false);
+  assert.equal(report.gateway.baseUrl, "http://127.0.0.1:50124");
+  assert.equal(report.gateway.apiKeySource, "TABBIT_API_KEY=doctor-key");
+  assert.equal(report.gateway.health.reachable, false);
+});
+
+test("doctor prints a readable report", async () => {
+  const originalLog = console.log;
+  let output = "";
+  console.log = (message) => {
+    output += `${message}\n`;
+  };
+
+  try {
+    await runDoctor(
+      {
+        host: "127.0.0.1",
+        port: 50124,
+        apiKey: "doctor-key",
+      },
+      {},
+    );
+  } finally {
+    console.log = originalLog;
+  }
+
+  assert.match(output, /Tabbit2API doctor/);
+  assert.match(output, /Runtime/);
+  assert.match(output, /Gateway/);
+  assert.match(output, /\/health/);
+});
+
+test("doctor reports reachable health when gateway is already running", async () => {
+  const report = await collectDoctorReport(
+    {
+      optionSources: {
+        apiKey: "flag:--api-key",
+        host: "flag:--host",
+        port: "flag:--port",
+      },
+    },
+    {},
+    {
+      checkHealth: async () => ({
+        reachable: true,
+        statusCode: 200,
+        runtimeInitialized: false,
+      }),
+      hasLabProfile: async () => true,
+    },
+  );
+
+  assert.equal(report.runtime.profileExists, true);
+  assert.equal(report.gateway.health.reachable, true);
+  assert.equal(report.gateway.hostSource, "flag:--host");
+  assert.equal(report.gateway.portSource, "flag:--port");
+  assert.equal(report.gateway.apiKeySource, "flag:--api-key");
 });

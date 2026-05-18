@@ -13,11 +13,13 @@ export const HELP_TEXT = `Tabbit2API
 
 Usage:
   tabbit2api [start] [options]
+  tabbit2api doctor [options]
   tabbit2api login [options]
   tabbit2api probe [options]
 
 Commands:
   start        Start the local gateway (default)
+  doctor       Check local runtime paths and gateway health
   login        Open Tabbit login window and refresh the runtime profile
   probe        Inspect the Tabbit chat runtime and write probe artifacts
 
@@ -29,6 +31,11 @@ Options:
   --keep-open         Keep the probe browser open
   --help, -h          Show this help
   --version, -v       Show package version
+
+Examples:
+  npx tabbit2api
+  tabbit2api doctor
+  tabbit2api start --port 50125
 
 Environment:
   TABBIT_LAB_ROOT     Override runtime data directory
@@ -60,13 +67,23 @@ function parsePort(value) {
 }
 
 export function parseCliArgs(args, env = process.env) {
+  const hostFromEnv = env.HOST || DEFAULT_HOST;
+  const portFromEnv = env.PORT || String(DEFAULT_PORT);
+  const apiKeyFromEnv = env.TABBIT_API_KEY || DEFAULT_API_KEY;
+
   const parsed = {
-    apiKey: env.TABBIT_API_KEY || DEFAULT_API_KEY,
+    apiKey: apiKeyFromEnv,
     command: "start",
     help: false,
-    host: env.HOST || DEFAULT_HOST,
+    host: hostFromEnv,
     keepOpen: false,
-    port: parsePort(env.PORT || String(DEFAULT_PORT)),
+    optionSources: {
+      apiKey:
+        env.TABBIT_API_KEY ? "env:TABBIT_API_KEY" : `default:${DEFAULT_API_KEY}`,
+      host: env.HOST ? "env:HOST" : `default:${DEFAULT_HOST}`,
+      port: env.PORT ? "env:PORT" : `default:${DEFAULT_PORT}`,
+    },
+    port: parsePort(portFromEnv),
     refresh: false,
     version: false,
   };
@@ -76,7 +93,7 @@ export function parseCliArgs(args, env = process.env) {
     parsed.command = rest.shift();
   }
 
-  if (!["start", "login", "probe"].includes(parsed.command)) {
+  if (!["start", "doctor", "login", "probe"].includes(parsed.command)) {
     throw new Error(`Unknown command '${parsed.command}'.`);
   }
 
@@ -105,17 +122,20 @@ export function parseCliArgs(args, env = process.env) {
 
     if (arg === "--port") {
       parsed.port = parsePort(takeValue(rest, index, arg));
+      parsed.optionSources.port = "flag:--port";
       index += 1;
       continue;
     }
 
     if (arg.startsWith("--port=")) {
       parsed.port = parsePort(arg.slice("--port=".length));
+      parsed.optionSources.port = "flag:--port";
       continue;
     }
 
     if (arg === "--host") {
       parsed.host = takeValue(rest, index, arg);
+      parsed.optionSources.host = "flag:--host";
       index += 1;
       continue;
     }
@@ -125,11 +145,13 @@ export function parseCliArgs(args, env = process.env) {
       if (!parsed.host) {
         throw new Error("--host requires a value.");
       }
+      parsed.optionSources.host = "flag:--host";
       continue;
     }
 
     if (arg === "--api-key") {
       parsed.apiKey = takeValue(rest, index, arg);
+      parsed.optionSources.apiKey = "flag:--api-key";
       index += 1;
       continue;
     }
@@ -139,6 +161,7 @@ export function parseCliArgs(args, env = process.env) {
       if (!parsed.apiKey) {
         throw new Error("--api-key requires a value.");
       }
+      parsed.optionSources.apiKey = "flag:--api-key";
       continue;
     }
 

@@ -3,11 +3,36 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Tabbit to OpenAI Responses-compatible gateway for local agent integrations.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hwttop5/tabbit2api.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hwttop5/tabbit2api/issues"
+  },
+  "homepage": "https://github.com/hwttop5/tabbit2api#readme",
+  "keywords": [
+    "tabbit",
+    "openai",
+    "responses",
+    "anthropic",
+    "gateway",
+    "cli",
+    "local-ai"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "bin": {
     "tabbit2api": "./src/cli.js"
   },
   "files": [
     "src/",
+    "docs/",
     "README.md",
     "LICENSE",
     "CONTRIBUTING.md",

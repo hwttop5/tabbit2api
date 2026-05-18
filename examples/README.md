@@ -1,35 +1,45 @@
 # Tabbit2API examples
 
-These examples use the local default gateway:
+These examples assume you already have a local Tabbit2API gateway running.
 
-```text
-Base URL: http://127.0.0.1:50124
-API key: sk-tabbit-local
-Model: tabbit/priority
+Start it with either:
+
+```powershell
+tabbit2api
 ```
 
-Start the gateway before using any client example:
+or:
 
 ```powershell
 tabbit2api start
 ```
 
+Default local values:
+
+```text
+OpenAI Responses base URL: http://127.0.0.1:50124/v1
+Anthropic Messages base URL: http://127.0.0.1:50124
+API key: sk-tabbit-local
+Model: tabbit/priority
+```
+
+## Which base URL to use
+
+- Codex and Hermes Agent: use `http://127.0.0.1:50124/v1`
+- Claude Code and OpenClaw: use `http://127.0.0.1:50124`
+
 ## Clients
 
 - `codex/config.toml.example`
-  - Codex Desktop / Codex CLI provider snippet.
-  - Uses OpenAI Responses protocol at `http://127.0.0.1:50124/v1`.
-  - Set `TABBIT_API_KEY=sk-tabbit-local` before starting Codex.
+  - Codex Desktop / Codex CLI provider snippet
+  - Uses OpenAI Responses at `http://127.0.0.1:50124/v1`
 - `claude-code/env.powershell.example`
-  - Claude Code environment variables for Windows PowerShell.
+  - Claude Code environment variables for Windows PowerShell
 - `claude-code/env.sh.example`
-  - Claude Code environment variables for POSIX shells.
+  - Claude Code environment variables for POSIX shells
 - `openclaw/env.powershell.example`
-  - OpenClaw environment variables for Windows PowerShell.
+  - OpenClaw environment variables for Windows PowerShell
 - `openclaw/env.sh.example`
-  - OpenClaw environment variables for POSIX shells.
+  - OpenClaw environment variables for POSIX shells
 - `hermes/config.yaml.example`
-  - Hermes Agent config example.
-
-For Anthropic-compatible clients such as Claude Code and OpenClaw, use
-`http://127.0.0.1:50124` without a trailing `/v1`.
+  - Hermes Agent config example

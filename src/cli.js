@@ -7,6 +7,7 @@ import {
   readPackageVersion,
 } from "./cli-options.js";
 import { LAB_PROFILE_DIR } from "./config.js";
+import { runDoctor } from "./doctor.js";
 import { startGateway } from "./gateway.js";
 import { runLogin } from "./login.js";
 import { hasLabProfile } from "./profile.js";
@@ -19,12 +20,14 @@ export async function runStart(options, deps = {}) {
   const start = deps.startGateway || startGateway;
 
   if (options.refresh || !(await hasRuntimeProfile(labProfileDir))) {
-    console.log("Tabbit2API needs a runtime profile before starting.");
-    console.log("A Tabbit login window will open. Sign in there to continue.");
+    console.log(`Tabbit2API did not find a runtime profile at ${labProfileDir}.`);
+    console.log("A Tabbit login window will open now, and startup will wait for sign-in.");
     await login({
       refresh: options.refresh,
       waitForLogin: true,
     });
+    console.log(`Runtime profile is ready at ${labProfileDir}.`);
+    console.log(`After startup, verify with http://${options.host}:${options.port}/health or run \`tabbit2api doctor\`.`);
   }
 
   start({
@@ -44,6 +47,11 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
 
   if (options.version) {
     console.log(readPackageVersion());
+    return;
+  }
+
+  if (options.command === "doctor") {
+    await runDoctor(options, env);
     return;
   }
 
