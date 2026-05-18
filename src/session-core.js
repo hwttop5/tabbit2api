@@ -172,6 +172,61 @@ function normalizeOpenAiInputPart(part) {
   return [];
 }
 
+function isOpenAiMessageInput(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      typeof value.role === "string" &&
+      ("content" in value || "text" in value),
+  );
+}
+
+function normalizeOpenAiMessageContent(message) {
+  const contentValue =
+    message?.content ?? (typeof message?.text === "string" ? message.text : null);
+
+  if (typeof contentValue === "string") {
+    return [{ type: "text", text: contentValue }];
+  }
+
+  return normalizeOpenAiInputPart(contentValue);
+}
+
+function normalizeOpenAiInputMessages(input) {
+  if (!Array.isArray(input)) {
+    const content = normalizeOpenAiInputPart(input);
+    return content.length ? [{ role: "user", content }] : [];
+  }
+
+  const messages = [];
+  const looseContent = [];
+
+  for (const entry of input) {
+    if (isOpenAiMessageInput(entry)) {
+      const content = normalizeOpenAiMessageContent(entry);
+      if (content.length) {
+        messages.push({
+          role: cleanText(entry.role) || "user",
+          content,
+        });
+      }
+      continue;
+    }
+
+    looseContent.push(...normalizeOpenAiInputPart(entry));
+  }
+
+  if (looseContent.length) {
+    messages.push({
+      role: "user",
+      content: looseContent,
+    });
+  }
+
+  return messages;
+}
+
 function ensureMessageForAttachments(messages, attachments) {
   if (messages.length || !attachments.length) {
     return messages;
@@ -316,8 +371,8 @@ export function normalizeAnthropicRequest(body, helpers = {}) {
 }
 
 export function normalizeOpenAiRequest(body) {
-  const content = normalizeOpenAiInputPart(body?.input);
   const attachments = collectOpenAiAttachments(body?.input);
+  const messages = normalizeOpenAiInputMessages(body?.input);
   const clientTools = [];
   for (const tool of Array.isArray(body?.tools) ? body.tools : []) {
     if (tool?.type === "function" && tool.function?.name) {
@@ -344,17 +399,7 @@ export function normalizeOpenAiRequest(body) {
         : "tabbit/priority",
     publicModel: body?.model || "tabbit/priority",
     system: normalizeSystem(body?.instructions),
-    messages: ensureMessageForAttachments(
-      content.length
-        ? [
-            {
-              role: "user",
-              content,
-            },
-          ]
-        : [],
-      attachments,
-    ),
+    messages: ensureMessageForAttachments(messages, attachments),
     attachments,
     tools: {
       client: clientTools,
@@ -394,17 +439,27 @@ function toolChoiceInstructions(toolChoice) {
   return "Tool usage is optional when helpful.";
 }
 
-function sanitizeTextForNativeAttachments(text) {
+function sanitizeTextForNativeAttachments(text, role = "") {
   if (typeof text !== "string" || !text) {
     return text;
   }
 
-  return text
+  const sanitized = text
     .replace(
       /\s*\[(?:Image|File|Document) attached at:\s*[^\]\r\n]+\]/gi,
       "\n[Attachment is available as a native Tabbit reference]",
     )
+    .replace(
+      /(?:[A-Za-z]:[\\/]|\\\\|\/home\/|\/mnt\/)[^\s'"`)]+\.hermes[^\s'"`)]+/gi,
+      "[native attachment path hidden]",
+    )
     .replace(/\bvision_analyze\b/gi, "the separate image-analysis helper");
+
+  if (role === "assistant" && attachmentFallbackSignals(sanitized).length) {
+    return "[Previous assistant attachment-analysis failure message ignored. Native attachments are available in this turn.]";
+  }
+
+  return sanitized;
 }
 
 function sanitizeToolDescriptionForNativeAttachments(description) {
@@ -433,7 +488,7 @@ function summarizeNormalizedMessages(messages, { hasAttachments = false } = {}) 
         return {
           ...block,
           text: hasAttachments
-            ? sanitizeTextForNativeAttachments(block.text)
+            ? sanitizeTextForNativeAttachments(block.text, message.role)
             : block.text,
         };
       }
@@ -834,10 +889,14 @@ function attachmentFallbackSignals(text) {
 
   const patterns = [
     /自动分析超时/,
-    /上游限制/,
+    /视觉识别.{0,20}超时/,
+    /视觉通道.{0,20}(?:坏|挂|不可用|不稳定)/,
+    /上游.{0,20}(?:30\s*s|30\s*秒).{0,20}(?:限制|超时|timeout)/i,
+    /上游.{0,10}限制/,
     /没拿到图像内容/,
     /没拿到(?:图片|图像|文件)(?:内容|描述)?/,
     /未(?:拿到|获取到)(?:图片|图像|文件)(?:内容|描述)?/,
+    /(?:还是|依然|仍然|依旧).{0,20}(?:拿不到|没拿到).{0,20}(?:图像|图片|附件|文件)/,
     /无法(?:查看|看到|读取|分析)(?:这张|该)?(?:图片|图像|附件|文件)/,
     /no image (?:attached|provided|available)/i,
     /image (?:analysis|analy[sz]e) (?:timed out|timeout)/i,

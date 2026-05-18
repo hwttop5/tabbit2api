@@ -467,6 +467,34 @@ test("OpenAI Responses normalizes input_image data URLs as attachments", () => {
   assert.doesNotMatch(buildStructuredPrompt(normalized), /iVBORw0KGgo/);
 });
 
+test("OpenAI Responses normalizes Hermes image_url object attachments", () => {
+  const normalized = normalizeOpenAiRequest({
+    model: "tabbit/priority",
+    input: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text:
+              "Image test\n\n[Image attached at: /home/ttop5/.hermes/cache/images/img_latest.jpg]",
+          },
+          { type: "image_url", image_url: { url: tinyPngDataUrl } },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(normalized.attachments.length, 1);
+  assert.equal(normalized.attachments[0].kind, "image");
+  assert.equal(normalized.attachments[0].source, "data");
+
+  const prompt = buildStructuredPrompt(normalized);
+  assert.doesNotMatch(prompt, /iVBORw0KGgo/);
+  assert.doesNotMatch(prompt, /img_latest\.jpg/);
+  assert.match(prompt, /Attachment is available as a native Tabbit reference/);
+});
+
 test("OpenAI Responses normalizes input_file PDF, HTML, and HTTP URL attachments", () => {
   const normalized = normalizeOpenAiRequest({
     model: "tabbit/priority",
@@ -492,6 +520,49 @@ test("OpenAI Responses normalizes input_file PDF, HTML, and HTTP URL attachments
   );
   assert.equal(normalized.attachments[2].source, "url");
   assert.equal(normalized.messages[0].content[0].text, "Please analyze the attached file(s).");
+});
+
+test("OpenAI Responses preserves role history with native attachments", () => {
+  const normalized = normalizeOpenAiRequest({
+    model: "tabbit/priority",
+    input: [
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: "图片测试" },
+          { type: "input_image", image_url: tinyPngDataUrl },
+        ],
+      },
+      {
+        role: "assistant",
+        content:
+          "图片又收到了,但视觉识别这次还是超时了(上游 30s 限制),我这边依然拿不到图像内容描述。\n本地路径:/home/ttop5/.hermes/cache/images/img_old.jpg",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text:
+              "图片测试\n\n[Image attached at: /home/ttop5/.hermes/cache/images/img_new.jpg]",
+          },
+          { type: "image_url", image_url: tinyPngDataUrl },
+        ],
+      },
+    ],
+  });
+
+  assert.deepEqual(
+    normalized.messages.map((message) => message.role),
+    ["user", "assistant", "user"],
+  );
+  assert.equal(normalized.attachments.length, 2);
+
+  const prompt = buildStructuredPrompt(normalized);
+  assert.doesNotMatch(prompt, /视觉识别这次还是超时/);
+  assert.doesNotMatch(prompt, /img_old\.jpg|img_new\.jpg/);
+  assert.match(prompt, /Previous assistant attachment-analysis failure message ignored/);
+  assert.match(prompt, /Attachment is available as a native Tabbit reference/);
 });
 
 test("OpenAI Responses accepts attachment-only requests", async () => {
