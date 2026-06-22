@@ -23,6 +23,7 @@ import { normalizeChatCompletionsRequest } from "../src/openai-chat.js";
 import {
   attachmentUploadResultToReference,
   classifyAttemptFailure,
+  putPresignedUpload,
 } from "../src/tabbit-web-bridge.js";
 import {
   buildGatewayCatalogBundle,
@@ -1919,6 +1920,98 @@ test("bridge maps uploaded image and document attachments to Tabbit references",
   assert.equal(documentReference.title, "paper.pdf");
   assert.equal(documentReference.content, "");
   assert.equal(documentReference.path, "file-doc");
+});
+
+test("bridge prefers Tabbit reference helpers when mapping upload results", () => {
+  const imageReference = attachmentUploadResultToReference(
+    { kind: "image", filename: "pic.png" },
+    {
+      success: true,
+      fileId: "file-image",
+      url: "https://cdn.test/pic.png",
+      fileName: "pic.png",
+    },
+    {
+      rf: (title, url, fileId) => ({
+        id: "helper-image",
+        type: "image",
+        title,
+        content: url,
+        path: fileId,
+      }),
+    },
+  );
+  assert.deepEqual(imageReference, {
+    id: "helper-image",
+    type: "image",
+    title: "pic.png",
+    content: "https://cdn.test/pic.png",
+    path: "file-image",
+  });
+
+  const documentReference = attachmentUploadResultToReference(
+    { kind: "document", filename: "paper.pdf" },
+    {
+      success: true,
+      fileId: "file-doc",
+      fileName: "paper.pdf",
+    },
+    {
+      vT: (title, fileId) => ({
+        id: "helper-document",
+        type: "document",
+        title,
+        content: "",
+        path: fileId,
+      }),
+    },
+  );
+  assert.deepEqual(documentReference, {
+    id: "helper-document",
+    type: "document",
+    title: "paper.pdf",
+    content: "",
+    path: "file-doc",
+  });
+});
+
+test("putPresignedUpload uploads base64 bytes with the attachment content type", async () => {
+  let captured;
+  const result = await putPresignedUpload({
+    presignedUrl: "https://cos.test/upload?signature=abc",
+    bytes: Buffer.from("hello").toString("base64"),
+    mimeType: "text/plain",
+    fetchImpl: async (url, options) => {
+      captured = {
+        url,
+        method: options.method,
+        contentType: options.headers["Content-Type"],
+        body: Buffer.from(options.body).toString("utf8"),
+      };
+      return new Response("", { status: 200 });
+    },
+  });
+
+  assert.deepEqual(result, { success: true });
+  assert.deepEqual(captured, {
+    url: "https://cos.test/upload?signature=abc",
+    method: "PUT",
+    contentType: "text/plain",
+    body: "hello",
+  });
+});
+
+test("putPresignedUpload reports failed COS uploads", async () => {
+  await assert.rejects(
+    () =>
+      putPresignedUpload({
+        presignedUrl: "https://cos.test/upload?signature=abc",
+        bytes: Buffer.from("hello").toString("base64"),
+        mimeType: "text/plain",
+        fetchImpl: async () => new Response("", { status: 403, statusText: "Forbidden" }),
+      }),
+    /Tabbit COS upload failed: HTTP 403 Forbidden/,
+  );
 });
 
 test("executeServerToolUse handles unsupported tools explicitly", async () => {

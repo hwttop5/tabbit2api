@@ -1,3 +1,5 @@
+import { Buffer } from "node:buffer";
+
 import {
   LAB_PROFILE_DIR,
   TABBIT_CHAT_URL,
@@ -89,7 +91,11 @@ function randomReferenceId() {
   return `${Date.now() + Math.floor(Math.random() * 1_000_000)}`;
 }
 
-export function attachmentUploadResultToReference(attachment, uploadResult) {
+export function attachmentUploadResultToReference(
+  attachment,
+  uploadResult,
+  referenceHelpers = null,
+) {
   const fileId = cleanText(
     uploadResult?.fileId ||
       uploadResult?.file_id ||
@@ -110,6 +116,17 @@ export function attachmentUploadResultToReference(attachment, uploadResult) {
   );
   const url = cleanText(uploadResult?.url || uploadResult?.fileUrl || "");
 
+  if (attachment?.kind === "image" && typeof referenceHelpers?.rf === "function") {
+    const reference = referenceHelpers.rf(title, url, fileId);
+    return attachment.sourceUrl
+      ? { ...reference, sourceUrl: attachment.sourceUrl }
+      : reference;
+  }
+
+  if (attachment?.kind !== "image" && typeof referenceHelpers?.vT === "function") {
+    return referenceHelpers.vT(title, fileId);
+  }
+
   if (attachment?.kind === "image") {
     return {
       id: randomReferenceId(),
@@ -129,6 +146,43 @@ export function attachmentUploadResultToReference(attachment, uploadResult) {
     content: "",
     path: fileId,
   };
+}
+
+export async function putPresignedUpload({
+  presignedUrl,
+  bytes,
+  mimeType,
+  fetchImpl = globalThis.fetch,
+}) {
+  if (typeof fetchImpl !== "function") {
+    throw new Error("Node fetch is unavailable for Tabbit attachment upload.");
+  }
+
+  if (!cleanText(presignedUrl)) {
+    throw new Error("Tabbit upload did not return a presigned upload URL.");
+  }
+
+  if (!bytes) {
+    throw new Error("Attachment has no upload bytes.");
+  }
+
+  const response = await fetchImpl(presignedUrl, {
+    method: "PUT",
+    body: Buffer.from(bytes, "base64"),
+    headers: {
+      "Content-Type": mimeType || "application/octet-stream",
+    },
+  });
+
+  if (!response?.ok) {
+    throw new Error(
+      `Tabbit COS upload failed: HTTP ${response?.status || "error"} ${
+        response?.statusText || ""
+      }`.trim(),
+    );
+  }
+
+  return { success: true };
 }
 
 async function createBridge() {
@@ -213,6 +267,7 @@ async function sendUsingPageModule(
   { prompt, selectedModel, timeoutMs, models, onDelta, attachments = [] },
 ) {
   const streamId = `tabbit-stream-${Date.now()}-${++streamSequence}`;
+  const uploadBridgeName = `tabbit-upload-${Date.now()}-${streamSequence}`;
   if (onDelta) {
     await page.exposeFunction(streamId, (payload) => {
       if (payload && typeof payload.delta === "string" && payload.delta) {
@@ -220,6 +275,18 @@ async function sendUsingPageModule(
       }
     });
   }
+
+  await page.exposeFunction(uploadBridgeName, async (payload) => {
+    try {
+      await putPresignedUpload(payload || {});
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: serializeError(error),
+      };
+    }
+  });
 
   try {
     return await page.evaluate(
@@ -229,6 +296,7 @@ async function sendUsingPageModule(
       timeoutMs,
       models,
       streamBridgeName,
+      uploadBridgeName,
       attachments,
       }) => {
       function captureWebpackRequire() {
@@ -288,6 +356,40 @@ async function sendUsingPageModule(
         return Promise.race([promise, timeoutPromise]).finally(() => {
           clearTimeout(timer);
         });
+      }
+
+      function resolveReferenceHelpers(runtime) {
+        for (const moduleId of [53045, 45677]) {
+          try {
+            const candidate = runtime(moduleId);
+            if (
+              typeof candidate?.rf === "function" ||
+              typeof candidate?.vT === "function"
+            ) {
+              return candidate;
+            }
+          } catch {
+            // Module ids change between Tabbit Web builds.
+          }
+        }
+
+        return null;
+      }
+
+      function resolveCosUploadApi(runtime) {
+        try {
+          const candidate = runtime(93703);
+          if (
+            typeof candidate?.Kh === "function" &&
+            typeof candidate?.dd === "function"
+          ) {
+            return candidate;
+          }
+        } catch {
+          // Fall back to the browser-side upload helper.
+        }
+
+        return null;
       }
 
       function uploadResultToReference(attachment, uploadResult, referenceHelpers) {
@@ -351,6 +453,80 @@ async function sendUsingPageModule(
         };
       }
 
+      async function uploadAttachmentWithNodeBridge(
+        runtime,
+        attachment,
+        uploadTimeoutMs,
+      ) {
+        const uploadApi = resolveCosUploadApi(runtime);
+        if (!uploadApi || typeof self[uploadBridgeName] !== "function") {
+          return null;
+        }
+
+        const mimeType = attachment.mimeType || "application/octet-stream";
+        const isImage = attachment.kind === "image";
+        const presign = await withTimeout(
+          uploadApi.Kh(
+            isImage ? "image" : "document",
+            attachment.filename,
+            mimeType,
+            isImage,
+            isImage ? 1_728_000 : undefined,
+          ),
+          uploadTimeoutMs,
+          `Preparing attachment '${attachment.filename}'`,
+        );
+
+        if (!presign?.success || !presign.presignedUrl || !presign.fileId) {
+          throw new Error(
+            presign?.error ||
+              presign?.message ||
+              `Tabbit did not return a presigned upload URL for '${attachment.filename}'.`,
+          );
+        }
+
+        const uploadResult = await withTimeout(
+          self[uploadBridgeName]({
+            presignedUrl: presign.presignedUrl,
+            bytes: attachment.bytes,
+            mimeType,
+          }),
+          uploadTimeoutMs,
+          `Uploading attachment '${attachment.filename}'`,
+        );
+
+        if (!uploadResult?.success) {
+          throw new Error(
+            uploadResult?.error ||
+              `Tabbit COS upload failed for '${attachment.filename}'.`,
+          );
+        }
+
+        const complete = await withTimeout(
+          uploadApi.dd(presign.fileId),
+          uploadTimeoutMs,
+          `Completing attachment upload '${attachment.filename}'`,
+        );
+
+        if (!complete?.success) {
+          throw new Error(
+            complete?.error ||
+              complete?.message ||
+              `Tabbit upload completion failed for '${attachment.filename}'.`,
+          );
+        }
+
+        return {
+          success: true,
+          url:
+            isImage && presign.downloadUrl
+              ? presign.downloadUrl
+              : presign.presignedUrl.split("?")[0],
+          fileName: attachment.filename,
+          fileId: presign.fileId,
+        };
+      }
+
       async function uploadAttachments(runtime, attachmentList, uploadTimeoutMs) {
         if (!Array.isArray(attachmentList) || attachmentList.length === 0) {
           return [];
@@ -363,16 +539,12 @@ async function sendUsingPageModule(
           uploadFile = null;
         }
 
-        if (typeof uploadFile !== "function") {
+        const canUseNodeUpload = Boolean(resolveCosUploadApi(runtime));
+        if (typeof uploadFile !== "function" && !canUseNodeUpload) {
           throw new Error("Unable to find Tabbit attachment upload function.");
         }
 
-        let referenceHelpers;
-        try {
-          referenceHelpers = runtime(45677);
-        } catch {
-          referenceHelpers = null;
-        }
+        const referenceHelpers = resolveReferenceHelpers(runtime);
 
         const references = [];
         for (const attachment of attachmentList) {
@@ -385,13 +557,38 @@ async function sendUsingPageModule(
           const file = new File([bytesFromBase64(attachment.bytes)], attachment.filename, {
             type: attachment.mimeType || "application/octet-stream",
           });
-          const uploadResult = await withTimeout(
-            uploadFile(file, {
-              fileCategory: attachment.kind === "image" ? "image" : "document",
-            }),
-            uploadTimeoutMs,
-            `Uploading attachment '${attachment.filename}'`,
-          );
+          let uploadResult;
+          let nodeUploadError = null;
+          try {
+            uploadResult = await uploadAttachmentWithNodeBridge(
+              runtime,
+              attachment,
+              uploadTimeoutMs,
+            );
+          } catch (error) {
+            nodeUploadError = error;
+          }
+
+          if (!uploadResult && typeof uploadFile === "function") {
+            try {
+              uploadResult = await withTimeout(
+                uploadFile(file, {
+                  fileCategory: attachment.kind === "image" ? "image" : "document",
+                }),
+                uploadTimeoutMs,
+                `Uploading attachment '${attachment.filename}'`,
+              );
+            } catch (error) {
+              if (nodeUploadError) {
+                throw nodeUploadError;
+              }
+              throw error;
+            }
+          }
+
+          if (!uploadResult && nodeUploadError) {
+            throw nodeUploadError;
+          }
 
           if (!uploadResult || uploadResult.success === false) {
             throw new Error(
@@ -776,6 +973,7 @@ async function sendUsingPageModule(
         timeoutMs,
         models,
         streamBridgeName: streamId,
+        uploadBridgeName,
         attachments,
       },
     );
