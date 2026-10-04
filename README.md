@@ -73,7 +73,7 @@ curl.exe -H "Authorization: Bearer sk-tabbit-local" http://127.0.0.1:50124/v1/mo
 Windows 可执行文件: %USERPROFILE%\AppData\Local\Tabbit\Application\Tabbit.exe 或 Tabbit Browser.exe
 Windows 用户数据目录: %USERPROFILE%\AppData\Local\Tabbit\User Data
 macOS 可执行文件: /Applications/Tabbit.app/Contents/MacOS/Tabbit
-macOS 用户数据目录: ~/Library/Application Support/Tabbit/User Data
+macOS 用户数据目录: ~/Library/Application Support/Tabbit
 ```
 
 Windows 会优先使用 `TABBIT_EXECUTABLE`；如果该变量指向已改名的 `Tabbit.exe` 或 `Tabbit Browser.exe`，会自动尝试同目录的另一个名称。未设置变量时还会读取 Windows `App Paths` 注册信息，因此 D 盘等自定义安装通常无需手动配置。仍无法识别时，可显式设置：
@@ -83,6 +83,8 @@ $env:TABBIT_EXECUTABLE = "D:\Program Files\Tabbit\Application\Tabbit Browser.exe
 $env:TABBIT_USER_DATA_DIR = "$env:LOCALAPPDATA\Tabbit\User Data"
 tabbit2api doctor
 ```
+
+macOS 上 Tabbit 把 profile 直接放在 `~/Library/Application Support/Tabbit`（其下即为 `Default`、`Local State`），而不是嵌套的 `User Data` 子目录。`tabbit2api` 会自动探测两种布局：若存在 `<目录>/Default` 就使用该目录，否则回退到旧的 `Tabbit/User Data`。仍无法识别时可用 `TABBIT_USER_DATA_DIR` 显式指定。
 
 运行时状态目录默认值：
 

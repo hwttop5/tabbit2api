@@ -73,7 +73,7 @@ Default paths:
 Windows executable: %USERPROFILE%\AppData\Local\Tabbit\Application\Tabbit.exe or Tabbit Browser.exe
 Windows user data directory: %USERPROFILE%\AppData\Local\Tabbit\User Data
 macOS executable: /Applications/Tabbit.app/Contents/MacOS/Tabbit
-macOS user data directory: ~/Library/Application Support/Tabbit/User Data
+macOS user data directory: ~/Library/Application Support/Tabbit
 ```
 
 On Windows, `TABBIT_EXECUTABLE` takes precedence. If it points to a renamed `Tabbit.exe` or `Tabbit Browser.exe`, the other filename in the same directory is tried automatically. When the variable is not set, Windows `App Paths` registry entries are also checked, so custom installations on drives such as D: usually need no manual configuration. If discovery still fails, set the variables explicitly:
@@ -83,6 +83,8 @@ $env:TABBIT_EXECUTABLE = "D:\Program Files\Tabbit\Application\Tabbit Browser.exe
 $env:TABBIT_USER_DATA_DIR = "$env:LOCALAPPDATA\Tabbit\User Data"
 tabbit2api doctor
 ```
+
+On macOS, Tabbit stores its profile directly under `~/Library/Application Support/Tabbit` (its `Default`, `Local State`, etc. live there), rather than in a nested `User Data` folder. `tabbit2api` detects both layouts: if `<dir>/Default` exists it uses that directory, otherwise it falls back to the legacy `Tabbit/User Data` path. If discovery still fails, set `TABBIT_USER_DATA_DIR` explicitly.
 
 Default runtime state directories:
 
