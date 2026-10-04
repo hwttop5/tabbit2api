@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { pathToFileURL } from "node:url";
+import { realpathSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   HELP_TEXT,
@@ -12,6 +13,30 @@ import { startGateway } from "./gateway.js";
 import { runLogin } from "./login.js";
 import { hasLabProfile } from "./profile.js";
 import { runProbe } from "./probe.js";
+
+/**
+ * Decide whether this module is being executed directly (vs. imported).
+ *
+ * `import.meta.url` is realpath-resolved by the Node loader, while `process.argv[1]`
+ * keeps the path used to launch the process (e.g. the `node_modules/.bin/tabbit2api`
+ * symlink). A strict string comparison therefore never matches when the CLI is run
+ * through its npm bin symlink, and `main()` would be silently skipped. Compare the
+ * canonical (realpath) forms instead.
+ */
+export function isDirectInvocation(
+  argv1 = process.argv[1],
+  moduleUrl = import.meta.url,
+) {
+  if (!argv1) {
+    return false;
+  }
+
+  try {
+    return realpathSync(fileURLToPath(moduleUrl)) === realpathSync(argv1);
+  } catch {
+    return moduleUrl === pathToFileURL(argv1).href;
+  }
+}
 
 export async function runStart(options, deps = {}) {
   const labProfileDir = deps.labProfileDir || LAB_PROFILE_DIR;
@@ -71,10 +96,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   await runStart(options);
 }
 
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
-) {
+if (isDirectInvocation()) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
