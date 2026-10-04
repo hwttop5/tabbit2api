@@ -169,6 +169,7 @@ export function defaultTabbitUserDataDir({
   env = process.env,
   platform = process.platform,
   homeDir = os.homedir(),
+  existsSync = fs.existsSync,
 } = {}) {
   const platformPath = pathForPlatform(platform);
 
@@ -177,13 +178,21 @@ export function defaultTabbitUserDataDir({
   }
 
   if (platform === "darwin") {
-    return platformPath.join(
+    // macOS Tabbit stores its profile directly under the app-support folder
+    // (e.g. ~/Library/Application Support/Tabbit/Default), unlike the Chromium
+    // convention of a nested "User Data" folder. Detect which layout exists and
+    // fall back to the legacy path when neither is present.
+    const appSupportDir = platformPath.join(
       homeDir,
       "Library",
       "Application Support",
       "Tabbit",
-      "User Data",
     );
+    if (existsSync(platformPath.join(appSupportDir, "Default"))) {
+      return appSupportDir;
+    }
+
+    return platformPath.join(appSupportDir, "User Data");
   }
 
   return platformPath.join(
